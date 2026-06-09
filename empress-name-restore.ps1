@@ -157,7 +157,7 @@ function Invoke-ReplaceNames {
         Write-ColorLine "[备份] 备份已存在，跳过" Yellow
     }
 
-    # 2. Verify byte lengths
+    # 2. Build byte pairs
     $pairs = @()
     foreach ($entry in $NameMapping) {
         $fromBuf = [System.Text.Encoding]::UTF8.GetBytes($entry.From)
@@ -166,10 +166,10 @@ function Invoke-ReplaceNames {
             Write-ColorLine "[错误] $($entry.Desc): 字节数不等($($fromBuf.Length) != $($toBuf.Length))，跳过" Red
             continue
         }
-        $pairs += @{ From = $entry.From; To = $entry.To; Desc = $entry.Desc }
+        $pairs += @{ FromBuf = $fromBuf; ToBuf = $toBuf; Desc = $entry.Desc }
     }
 
-    # 3. 扫描 TextClient*.pbin 文件 — 用 .NET regex 字符串替换
+    # 3. 扫描 TextClient*.pbin 文件 — 纯字节操作
     $textFiles = Get-ChildItem -LiteralPath $CfgPath -Filter "TextClient*.pbin" -File
     $totalReplacements = 0
     $totalFilesModified = 0
@@ -177,25 +177,35 @@ function Invoke-ReplaceNames {
     Write-Host ""
     Write-ColorLine "--- 开始替换 ---" Cyan
 
-    $fileCount = 0
     foreach ($file in $textFiles) {
-        $fileCount++
-        $text = [System.IO.File]::ReadAllText($file.FullName, [System.Text.Encoding]::UTF8)
-        $origLen = $text.Length
+        $data = [System.IO.File]::ReadAllBytes($file.FullName)
         $fileReplacements = 0
 
         foreach ($p in $pairs) {
-            $escaped = [regex]::Escape($p.From)
-            $count = ([regex]::Matches($text, $escaped)).Count
-            if ($count -gt 0) {
-                $text = [regex]::Replace($text, $escaped, $p.To)
-                $fileReplacements += $count
-                $totalReplacements += $count
+            $fromLen = $p.FromBuf.Length
+            $firstByte = $p.FromBuf[0]
+
+            # Use .NET Array.IndexOf (C# native) to jump to next candidate
+            $i = [Array]::IndexOf($data, $firstByte, 0)
+            while ($i -ge 0 -and $i -le $data.Length - $fromLen) {
+                # Verify remaining bytes
+                $found = $true
+                for ($j = 1; $j -lt $fromLen; $j++) {
+                    if ($data[$i + $j] -ne $p.FromBuf[$j]) { $found = $false; break }
+                }
+                if ($found) {
+                    [Array]::Copy($p.ToBuf, 0, $data, $i, $fromLen)
+                    $fileReplacements++
+                    $totalReplacements++
+                    $i = [Array]::IndexOf($data, $firstByte, $i + $fromLen)
+                } else {
+                    $i = [Array]::IndexOf($data, $firstByte, $i + 1)
+                }
             }
         }
 
         if ($fileReplacements -gt 0) {
-            [System.IO.File]::WriteAllBytes($file.FullName, [System.Text.Encoding]::UTF8.GetBytes($text))
+            [System.IO.File]::WriteAllBytes($file.FullName, $data)
             $totalFilesModified++
             Write-ColorLine "[修改] $($file.Name): $fileReplacements 处" White
         }
