@@ -4,19 +4,15 @@
 
 游戏中的大量历史人名被谐音替换（李唐皇室改姓"礼"、武氏改姓"伍"、国号"唐"改为"盛"、首都"长安"改为"盛安"等），本工具通过二进制级别的等字节替换，将所有名称还原为历史原名。
 
-## 效果展示
+## 效果展示（替换后）
 
-**替换前（游戏原始和谐版）：**
+![效果1](images/screenshot-1.png)
 
-![替换前-效果1](images/screenshot-before-1.png)
+![效果2](images/screenshot-2.png)
 
-![替换前-效果2](images/screenshot-before-2.png)
+![效果3](images/screenshot-3.png)
 
-**替换后（历史原名还原版）：**
-
-![替换后-效果1](images/screenshot-after-1.png)
-
-![替换后-效果2](images/screenshot-after-2.png)
+![效果4](images/screenshot-4.png)
 
 ## 还原对照表（23对）
 
