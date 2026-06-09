@@ -157,7 +157,7 @@ function Invoke-ReplaceNames {
         Write-ColorLine "[备份] 备份已存在，跳过" Yellow
     }
 
-    # 2. 构建 Buffer 对
+    # 2. Verify byte lengths
     $pairs = @()
     foreach ($entry in $NameMapping) {
         $fromBuf = [System.Text.Encoding]::UTF8.GetBytes($entry.From)
@@ -166,10 +166,10 @@ function Invoke-ReplaceNames {
             Write-ColorLine "[错误] $($entry.Desc): 字节数不等($($fromBuf.Length) != $($toBuf.Length))，跳过" Red
             continue
         }
-        $pairs += @{ FromBuf = $fromBuf; ToBuf = $toBuf; Desc = $entry.Desc; From = $entry.From; To = $entry.To }
+        $pairs += @{ From = $entry.From; To = $entry.To; Desc = $entry.Desc }
     }
 
-    # 3. 扫描 TextClient*.pbin 文件
+    # 3. 扫描 TextClient*.pbin 文件 — 用 .NET regex 字符串替换
     $textFiles = Get-ChildItem -LiteralPath $CfgPath -Filter "TextClient*.pbin" -File
     $totalReplacements = 0
     $totalFilesModified = 0
@@ -177,35 +177,27 @@ function Invoke-ReplaceNames {
     Write-Host ""
     Write-ColorLine "--- 开始替换 ---" Cyan
 
+    $fileCount = 0
     foreach ($file in $textFiles) {
-        $data = [System.IO.File]::ReadAllBytes($file.FullName)
-        $modified = $false
-        $fileCount = 0
+        $fileCount++
+        $text = [System.IO.File]::ReadAllText($file.FullName, [System.Text.Encoding]::UTF8)
+        $origLen = $text.Length
+        $fileReplacements = 0
 
         foreach ($p in $pairs) {
-            $fromLen = $p.FromBuf.Length
-            $toLen   = $p.ToBuf.Length
-            $i = 0
-            while ($i -le $data.Length - $fromLen) {
-                $found = $true
-                for ($j = 0; $j -lt $fromLen; $j++) {
-                    if ($data[$i + $j] -ne $p.FromBuf[$j]) { $found = $false; break }
-                }
-                if ($found) {
-                    [Array]::Copy($p.ToBuf, 0, $data, $i, $toLen)
-                    $fileCount++
-                    $totalReplacements++
-                    $i += $toLen
-                } else {
-                    $i++
-                }
+            $escaped = [regex]::Escape($p.From)
+            $count = ([regex]::Matches($text, $escaped)).Count
+            if ($count -gt 0) {
+                $text = [regex]::Replace($text, $escaped, $p.To)
+                $fileReplacements += $count
+                $totalReplacements += $count
             }
         }
 
-        if ($fileCount -gt 0) {
-            [System.IO.File]::WriteAllBytes($file.FullName, $data)
+        if ($fileReplacements -gt 0) {
+            [System.IO.File]::WriteAllBytes($file.FullName, [System.Text.Encoding]::UTF8.GetBytes($text))
             $totalFilesModified++
-            Write-ColorLine "[修改] $($file.Name): $fileCount 处" White
+            Write-ColorLine "[修改] $($file.Name): $fileReplacements 处" White
         }
     }
 
