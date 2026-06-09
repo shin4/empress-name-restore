@@ -61,47 +61,30 @@
 
 ## 使用方法
 
-### 环境要求
+### 方式一：双击运行（推荐，无需任何依赖）
 
-- [Node.js](https://nodejs.org/)（任意版本）
+1. 下载本仓库（Code → Download ZIP）并解压
+2. 双击 **`启动还原工具.bat`**
+3. 工具会自动搜索 Steam 游戏目录，显示菜单：
+   ```
+   [1] 替换人名（还原历史原名）
+   [2] 验证替换结果
+   [3] 还原为游戏原始版本
+   [4] 退出
+   ```
+4. 输入 `1` 回车即可完成替换
 
-### 安装
+> 首次运行自动备份原始文件，可随时通过菜单 `[3]` 还原。
 
-将以下 4 个文件放入游戏目录的 `tools/` 文件夹下：
+### 方式二：Node.js 脚本（适合开发者）
 
-```
-roadtoempress2/
-└── tools/
-    ├── name_mapping.json
-    ├── replace_names.js
-    ├── restore_names.js
-    └── verify_names.js
-```
-
-### 替换人名
-
-```bash
-node replace_names.js
-```
-
-- 首次运行自动备份原始文件到 `cfg/data/_backup_original/`
-- 幂等设计，可重复运行，已替换的不会重复处理
-
-### 验证替换结果
+需要 [Node.js](https://nodejs.org/)，将 `name_mapping.json`、`replace_names.js`、`restore_names.js`、`verify_names.js` 放入游戏目录后运行：
 
 ```bash
-node verify_names.js
+node replace_names.js    # 替换
+node verify_names.js     # 验证
+node restore_names.js    # 还原
 ```
-
-确认所有旧名已清除、新名已到位。
-
-### 还原为原始版本
-
-```bash
-node restore_names.js
-```
-
-从备份恢复所有原始文件。
 
 ## 工作原理
 
