@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     《女王的游戏：盛世天下》女帝篇 — 和谐人名还原工具
@@ -9,6 +9,13 @@
     作者: shin4
     仓库: https://github.com/shin4/empress-name-restore
 #>
+
+# ============================================================
+# 编码设置 (确保中文正常显示)
+# ============================================================
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+[Console]::InputEncoding  = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
 
 # ============================================================
 # 替换映射表
@@ -61,7 +68,7 @@ function Find-GameDirectory {
     foreach ($rp in $regPaths) {
         try {
             $val = (Get-ItemProperty -Path $rp -Name "InstallPath" -ErrorAction SilentlyContinue).InstallPath
-            if ($val) { $steamPaths += $val }
+            if ($val -and [System.IO.Path]::IsPathRooted($val)) { $steamPaths += $val }
         } catch {}
     }
 
@@ -85,11 +92,12 @@ function Find-GameDirectory {
         if (Test-Path -LiteralPath $vdfPath) {
             try {
                 $vdfContent = Get-Content -LiteralPath $vdfPath -Raw -Encoding UTF8
-                # 匹配 "path"	"D:\\GameLibrary" 格式
-                $matches = [regex]::Matches($vdfContent, '"path"\s+"([^"]+)"')
-                foreach ($m in $matches) {
+                $pathMatches = [regex]::Matches($vdfContent, '"path"\s+"([^"]+)"')
+                foreach ($m in $pathMatches) {
                     $libPath = $m.Groups[1].Value -replace '\\\\', '\'
-                    if (Test-Path -LiteralPath $libPath) { $steamPaths += $libPath }
+                    if ([System.IO.Path]::IsPathRooted($libPath) -and (Test-Path -LiteralPath $libPath)) {
+                        $steamPaths += $libPath
+                    }
                 }
             } catch {}
         }
@@ -99,21 +107,22 @@ function Find-GameDirectory {
     # 4. 在所有 Steam 路径中搜索游戏目录
     foreach ($sp in $steamPaths) {
         $gamePath = Join-Path $sp "steamapps\common\$gameFolderName"
-        if (Test-Path -LiteralPath $gamePath) { $candidates += $gamePath }
+        if (Test-Path -LiteralPath $gamePath) {
+            $cfgCheck = Join-Path $gamePath "Data\StreamingAssets\res\main\cfg\data"
+            if (Test-Path -LiteralPath $cfgCheck) { $candidates += $gamePath }
+        }
     }
 
     # 5. 搜索当前脚本所在目录的父级
-    $scriptParent = Split-Path $PSScriptRoot -Parent
-    if ($scriptParent) {
-        $testPath = Join-Path $scriptParent "Data\StreamingAssets\res\main\cfg\data"
-        if (Test-Path -LiteralPath $testPath) { $candidates += $scriptParent }
+    if ($PSScriptRoot) {
+        $scriptParent = Split-Path $PSScriptRoot -Parent
+        if ($scriptParent -and [System.IO.Path]::IsPathRooted($scriptParent)) {
+            $testPath = Join-Path $scriptParent "Data\StreamingAssets\res\main\cfg\data"
+            if (Test-Path -LiteralPath $testPath) { $candidates += $scriptParent }
+        }
     }
 
-    # 6. 搜索脚本自身所在目录
-    $testPath = Join-Path $PSScriptRoot "Data\StreamingAssets\res\main\cfg\data"
-    if (Test-Path -LiteralPath $testPath) { $candidates += $PSScriptRoot }
-
-    $candidates = $candidates | Select-Object -Unique
+    $candidates = @($candidates | Select-Object -Unique)
     return $candidates
 }
 
@@ -308,7 +317,7 @@ Write-Host ""
 
 # 自动搜索游戏目录
 Write-ColorLine "正在搜索游戏目录..." Yellow
-$gameDirs = Find-GameDirectory
+$gameDirs = @(Find-GameDirectory)
 
 if ($gameDirs.Count -eq 0) {
     Write-ColorLine "[错误] 未找到游戏目录" Red
