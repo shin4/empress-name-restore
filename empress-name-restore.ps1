@@ -223,49 +223,42 @@ function Invoke-VerifyNames {
 
     $textFiles = Get-ChildItem -LiteralPath $CfgPath -Filter "TextClient*.pbin" -File
 
-    # 表头
+    # Initialize counters
+    $fromCounts = @{}
+    $toCounts   = @{}
+    foreach ($entry in $NameMapping) {
+        $fromCounts[$entry.From] = 0
+        $toCounts[$entry.To]     = 0
+    }
+
+    # Single pass: read each file once, count all names via .NET regex
+    $fileCount = 0
+    foreach ($file in $textFiles) {
+        $fileCount++
+        Write-Host "`r  Scanning file $fileCount/$($textFiles.Count)..." -NoNewline
+
+        $text = [System.IO.File]::ReadAllText($file.FullName, [System.Text.Encoding]::UTF8)
+
+        foreach ($entry in $NameMapping) {
+            $fromCounts[$entry.From] += ([regex]::Matches($text, [regex]::Escape($entry.From))).Count
+            $toCounts[$entry.To]     += ([regex]::Matches($text, [regex]::Escape($entry.To))).Count
+        }
+    }
+    Write-Host "`r                                            "
+
+    # Print results
     $header = "{0,-16} {1,-8} {2,-8} {3,-8}" -f "说明", "旧名残留", "新名出现", "状态"
     Write-ColorLine $header Cyan
     Write-ColorLine ("-" * 60) DarkGray
 
     $allPassed = $true
-
     foreach ($entry in $NameMapping) {
-        $fromBuf = [System.Text.Encoding]::UTF8.GetBytes($entry.From)
-        $toBuf   = [System.Text.Encoding]::UTF8.GetBytes($entry.To)
-        $fromCount = 0
-        $toCount = 0
+        $fc = $fromCounts[$entry.From]
+        $tc = $toCounts[$entry.To]
+        $status = if ($fc -eq 0) { "OK" } else { "FAIL($fc)"; $allPassed = $false }
+        $statusColor = if ($fc -eq 0) { "Green" } else { "Red" }
 
-        foreach ($file in $textFiles) {
-            $data = [System.IO.File]::ReadAllBytes($file.FullName)
-
-            # 计算 from 出现次数
-            $i = 0
-            $fLen = $fromBuf.Length
-            while ($i -le $data.Length - $fLen) {
-                $found = $true
-                for ($j = 0; $j -lt $fLen; $j++) {
-                    if ($data[$i + $j] -ne $fromBuf[$j]) { $found = $false; break }
-                }
-                if ($found) { $fromCount++; $i += $fLen } else { $i++ }
-            }
-
-            # 计算 to 出现次数
-            $i = 0
-            $tLen = $toBuf.Length
-            while ($i -le $data.Length - $tLen) {
-                $found = $true
-                for ($j = 0; $j -lt $tLen; $j++) {
-                    if ($data[$i + $j] -ne $toBuf[$j]) { $found = $false; break }
-                }
-                if ($found) { $toCount++; $i += $tLen } else { $i++ }
-            }
-        }
-
-        $status = if ($fromCount -eq 0) { "OK" } else { "FAIL($fromCount)"; $allPassed = $false }
-        $statusColor = if ($fromCount -eq 0) { "Green" } else { "Red" }
-
-        $line = "{0,-16} {1,-8} {2,-8} " -f $entry.Desc, $fromCount, $toCount
+        $line = "{0,-16} {1,-8} {2,-8} " -f $entry.Desc, $fc, $tc
         Write-Host $line -NoNewline
         Write-ColorLine $status $statusColor
     }
