@@ -63,16 +63,17 @@
 
 ### 方式一：双击运行（推荐，无需任何依赖）
 
-1. 下载本仓库并解压：**[点击下载 ZIP](https://github.com/shin4/empress-name-restore/archive/refs/heads/master.zip)**
-2. 双击 **`启动还原工具.bat`**
-3. 工具会自动搜索 Steam 游戏目录，显示菜单：
+1. 下载本仓库：**[点击下载 ZIP](https://github.com/shin4/empress-name-restore/archive/refs/heads/master.zip)**
+2. **解压 ZIP 到任意文件夹**（不能直接在压缩包内运行）
+3. 进入解压后的文件夹，双击 **`启动还原工具.bat`**
+4. 工具会自动搜索 Steam 游戏目录，显示菜单：
    ```
    [1] 替换人名（还原历史原名）
    [2] 验证替换结果
    [3] 还原为游戏原始版本
    [4] 退出
    ```
-4. 输入 `1` 回车即可完成替换
+5. 输入 `1` 回车即可完成替换
 
 > 首次运行自动备份原始文件，可随时通过菜单 `[3]` 还原。
 
