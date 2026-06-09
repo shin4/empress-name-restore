@@ -63,7 +63,7 @@
 
 ### 方式一：双击运行（推荐，无需任何依赖）
 
-1. 下载本仓库（Code → Download ZIP）并解压
+1. 下载本仓库并解压：**[点击下载 ZIP](https://github.com/shin4/empress-name-restore/archive/refs/heads/master.zip)**
 2. 双击 **`启动还原工具.bat`**
 3. 工具会自动搜索 Steam 游戏目录，显示菜单：
    ```
