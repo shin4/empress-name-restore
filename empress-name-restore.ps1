@@ -21,29 +21,29 @@ $OutputEncoding = [System.Text.Encoding]::UTF8
 # 替换映射表
 # ============================================================
 $NameMapping = @(
-    @{ From = "伍元照"; To = "武则天"; Desc = "女主角本名" },
+    @{ From = "伍元照"; To = "武则天"; ToTrad = "武則天"; Desc = "女主角本名" },
     @{ From = "伍媚娘"; To = "武媚娘"; Desc = "女主角封号" },
     @{ From = "伍士彟"; To = "武士彟"; Desc = "武则天之父" },
     @{ From = "伍士渊"; To = "武士彟"; Desc = "武则天之父(异写)" },
-    @{ From = "伍元庆"; To = "武元庆"; Desc = "武则天大哥" },
+    @{ From = "伍元庆"; To = "武元庆"; ToTrad = "武元慶"; Desc = "武则天大哥" },
     @{ From = "伍元爽"; To = "武元爽"; Desc = "武则天二哥" },
-    @{ From = "伍元顺"; To = "武元顺"; Desc = "武则天长姐" },
-    @{ From = "礼治";   To = "李治";   Desc = "唐高宗" },
-    @{ From = "礼世民"; To = "李世民"; Desc = "唐太宗" },
-    @{ From = "礼泰";   To = "李泰";   Desc = "魏王" },
-    @{ From = "礼弘";   To = "李弘";   Desc = "太子" },
-    @{ From = "礼贤";   To = "李贤";   Desc = "章怀太子" },
-    @{ From = "礼显";   To = "李显";   Desc = "唐中宗" },
-    @{ From = "礼旦";   To = "李旦";   Desc = "唐睿宗" },
-    @{ From = "礼勣";   To = "李勣";   Desc = "凌烟阁功臣" },
-    @{ From = "礼敬业"; To = "徐敬业"; Desc = "起兵反武之人" },
-    @{ From = "高扬";   To = "高阳";   Desc = "高阳公主" },
-    @{ From = "上官宜"; To = "上官仪"; Desc = "太子太傅" },
+    @{ From = "伍元顺"; To = "武元顺"; ToTrad = "武元順"; Desc = "武则天长姐" },
+    @{ From = "礼治";   To = "李治";   FromTrad = "禮治";   Desc = "唐高宗" },
+    @{ From = "礼世民"; To = "李世民"; FromTrad = "禮世民"; Desc = "唐太宗" },
+    @{ From = "礼泰";   To = "李泰";   FromTrad = "禮泰";   Desc = "魏王" },
+    @{ From = "礼弘";   To = "李弘";   FromTrad = "禮弘";   Desc = "太子" },
+    @{ From = "礼贤";   To = "李贤";   FromTrad = "禮賢";   ToTrad = "李賢"; Desc = "章怀太子" },
+    @{ From = "礼显";   To = "李显";   FromTrad = "禮顯";   ToTrad = "李顯"; Desc = "唐中宗" },
+    @{ From = "礼旦";   To = "李旦";   FromTrad = "禮旦";   Desc = "唐睿宗" },
+    @{ From = "礼勣";   To = "李勣";   FromTrad = "禮勣";   Desc = "凌烟阁功臣" },
+    @{ From = "礼敬业"; To = "徐敬业"; FromTrad = "禮敬業"; ToTrad = "徐敬業"; Desc = "起兵反武之人" },
+    @{ From = "高扬";   To = "高阳";   FromTrad = "高揚";   ToTrad = "高陽"; Desc = "高阳公主" },
+    @{ From = "上官宜"; To = "上官仪"; ToTrad = "上官儀"; Desc = "太子太傅" },
     @{ From = "楚遂良"; To = "褚遂良"; Desc = "宰相" },
-    @{ From = "丘神绩"; To = "丘神勣"; Desc = "将领" },
-    @{ From = "狄任介"; To = "狄仁杰"; Desc = "朝臣" },
+    @{ From = "丘神绩"; To = "丘神勣"; FromTrad = "丘神績"; Desc = "将领" },
+    @{ From = "狄任介"; To = "狄仁杰"; ToTrad = "狄仁傑"; Desc = "朝臣" },
     @{ From = "盛朝";   To = "唐朝";   Desc = "国号" },
-    @{ From = "盛安";   To = "长安";   Desc = "首都" }
+    @{ From = "盛安";   To = "长安";   ToTrad = "長安"; Desc = "首都" }
 )
 
 # ============================================================
@@ -158,15 +158,40 @@ function Invoke-ReplaceNames {
     }
 
     # 2. Build byte pairs
-    $pairs = @()
+    # pairsSimp: from→to (non-zh_TW) or from→toTrad (zh_TW)
+    # pairsTrad: fromTrad→to (non-zh_TW) or fromTrad→toTrad (zh_TW)
+    $pairsSimp = @()
+    $pairsTrad = @()
+
     foreach ($entry in $NameMapping) {
         $fromBuf = [System.Text.Encoding]::UTF8.GetBytes($entry.From)
         $toBuf   = [System.Text.Encoding]::UTF8.GetBytes($entry.To)
         if ($fromBuf.Length -ne $toBuf.Length) {
-            Write-ColorLine "[错误] $($entry.Desc): 字节数不等($($fromBuf.Length) != $($toBuf.Length))，跳过" Red
+            Write-ColorLine "[错误] $($entry.Desc): 字节数不等，跳过" Red
             continue
         }
-        $pairs += @{ FromBuf = $fromBuf; ToBuf = $toBuf; Desc = $entry.Desc }
+
+        # Simplified target (for non-zh_TW) or Traditional target (for zh_TW)
+        if ($entry.ToTrad) {
+            $toTradBuf = [System.Text.Encoding]::UTF8.GetBytes($entry.ToTrad)
+            if ($fromBuf.Length -ne $toTradBuf.Length) {
+                Write-ColorLine "[错误] $($entry.Desc): 繁简目标字节数不等，跳过" Red
+                continue
+            }
+            $pairsSimp += @{ FromBuf = $fromBuf; ToBuf = $toBuf; ToTradBuf = $toTradBuf; Desc = $entry.Desc }
+        } else {
+            $pairsSimp += @{ FromBuf = $fromBuf; ToBuf = $toBuf; ToTradBuf = $null; Desc = $entry.Desc }
+        }
+
+        # Traditional source (for ALL files, shared files also contain 繁体)
+        if ($entry.FromTrad) {
+            $fromTradBuf = [System.Text.Encoding]::UTF8.GetBytes($entry.FromTrad)
+            $targetBuf = $toBuf
+            $targetTradBuf = if ($entry.ToTrad) { $toTradBuf } else { $null }
+            if ($fromTradBuf.Length -eq $toBuf.Length) {
+                $pairsTrad += @{ FromBuf = $fromTradBuf; ToBuf = $toBuf; ToTradBuf = $targetTradBuf; Desc = $entry.Desc }
+            }
+        }
     }
 
     # 3. 扫描 TextClient*.pbin 文件 — 纯字节操作
@@ -180,15 +205,31 @@ function Invoke-ReplaceNames {
     foreach ($file in $textFiles) {
         $data = [System.IO.File]::ReadAllBytes($file.FullName)
         $fileReplacements = 0
+        $isTrad = $file.Name -match 'zh_TW'
 
-        foreach ($p in $pairs) {
+        # Build active pairs: simplified + traditional, with correct targets
+        $activePairs = @()
+        foreach ($p in $pairsSimp) {
+            if ($isTrad -and $p.ToTradBuf) {
+                $activePairs += @{ FromBuf = $p.FromBuf; ToBuf = $p.ToTradBuf; Desc = $p.Desc }
+            } else {
+                $activePairs += @{ FromBuf = $p.FromBuf; ToBuf = $p.ToBuf; Desc = $p.Desc }
+            }
+        }
+        foreach ($p in $pairsTrad) {
+            if ($isTrad -and $p.ToTradBuf) {
+                $activePairs += @{ FromBuf = $p.FromBuf; ToBuf = $p.ToTradBuf; Desc = $p.Desc }
+            } else {
+                $activePairs += @{ FromBuf = $p.FromBuf; ToBuf = $p.ToBuf; Desc = $p.Desc }
+            }
+        }
+
+        foreach ($p in $activePairs) {
             $fromLen = $p.FromBuf.Length
             $firstByte = $p.FromBuf[0]
 
-            # Use .NET Array.IndexOf (C# native) to jump to next candidate
             $i = [Array]::IndexOf($data, $firstByte, 0)
             while ($i -ge 0 -and $i -le $data.Length - $fromLen) {
-                # Verify remaining bytes
                 $found = $true
                 for ($j = 1; $j -lt $fromLen; $j++) {
                     if ($data[$i + $j] -ne $p.FromBuf[$j]) { $found = $false; break }
@@ -226,11 +267,14 @@ function Invoke-VerifyNames {
     $textFiles = Get-ChildItem -LiteralPath $CfgPath -Filter "TextClient*.pbin" -File
 
     # Initialize counters
-    $fromCounts = @{}
-    $toCounts   = @{}
+    $fromCounts = @{}    # simplified source
+    $fromTradCounts = @{} # traditional source
+    $toCounts = @{}      # target (simplified + traditional combined)
     foreach ($entry in $NameMapping) {
         $fromCounts[$entry.From] = 0
-        $toCounts[$entry.To]     = 0
+        $toCounts[$entry.To] = 0
+        if ($entry.FromTrad) { $fromTradCounts[$entry.FromTrad] = 0 }
+        if ($entry.ToTrad)   { $toCounts[$entry.ToTrad] = 0 }
     }
 
     # Single pass: read each file once, count all names via .NET regex
@@ -244,6 +288,12 @@ function Invoke-VerifyNames {
         foreach ($entry in $NameMapping) {
             $fromCounts[$entry.From] += ([regex]::Matches($text, [regex]::Escape($entry.From))).Count
             $toCounts[$entry.To]     += ([regex]::Matches($text, [regex]::Escape($entry.To))).Count
+            if ($entry.FromTrad) {
+                $fromTradCounts[$entry.FromTrad] += ([regex]::Matches($text, [regex]::Escape($entry.FromTrad))).Count
+            }
+            if ($entry.ToTrad) {
+                $toCounts[$entry.ToTrad] += ([regex]::Matches($text, [regex]::Escape($entry.ToTrad))).Count
+            }
         }
     }
     Write-Host "`r                                            "
@@ -256,11 +306,16 @@ function Invoke-VerifyNames {
     $allPassed = $true
     foreach ($entry in $NameMapping) {
         $fc = $fromCounts[$entry.From]
+        $ftc = if ($entry.FromTrad) { $fromTradCounts[$entry.FromTrad] } else { 0 }
+        $totalOld = $fc + $ftc
         $tc = $toCounts[$entry.To]
-        $status = if ($fc -eq 0) { "OK" } else { "FAIL($fc)"; $allPassed = $false }
-        $statusColor = if ($fc -eq 0) { "Green" } else { "Red" }
+        if ($entry.ToTrad) { $tc += $toCounts[$entry.ToTrad] }
 
-        $line = "{0,-16} {1,-8} {2,-8} " -f $entry.Desc, $fc, $tc
+        $tradNote = if ($entry.FromTrad) { "+" } else { "" }
+        $status = if ($totalOld -eq 0) { "OK" } else { "FAIL($totalOld)"; $allPassed = $false }
+        $statusColor = if ($totalOld -eq 0) { "Green" } else { "Red" }
+
+        $line = "{0,-16} {1,-8} {2,-8} " -f $entry.Desc, "$totalOld$tradNote", $tc
         Write-Host $line -NoNewline
         Write-ColorLine $status $statusColor
     }
@@ -268,7 +323,7 @@ function Invoke-VerifyNames {
     Write-ColorLine ("-" * 60) DarkGray
     Write-Host ""
     if ($allPassed) {
-        Write-ColorLine "全部通过! 旧名已全部替换为历史原名。" Green
+        Write-ColorLine "全部通过! 旧名已全部替换为历史原名（简体+繁体）。" Green
     } else {
         Write-ColorLine "存在未完成的替换，请重新运行替换。" Red
     }
