@@ -18,6 +18,15 @@
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
 # ============================================================
+# 辅助函数 (必须在使用前定义)
+# ============================================================
+
+function Write-ColorLine {
+    param([string]$Text, [ConsoleColor]$Color = "White")
+    Write-Host $Text -ForegroundColor $Color
+}
+
+# ============================================================
 # 替换映射表 (从 name_mapping.json 读取)
 # ============================================================
 $MappingFile = Join-Path $PSScriptRoot "name_mapping.json"
@@ -119,11 +128,6 @@ function Find-GameDirectory {
 function Get-CfgDataPath {
     param([string]$GameDir)
     return Join-Path $GameDir "Data\StreamingAssets\res\main\cfg\data"
-}
-
-function Write-ColorLine {
-    param([string]$Text, [ConsoleColor]$Color = "White")
-    Write-Host $Text -ForegroundColor $Color
 }
 
 # ============================================================
