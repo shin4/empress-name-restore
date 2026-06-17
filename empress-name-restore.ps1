@@ -630,32 +630,35 @@ Write-Host ""
 while ($true) {
     Write-ColorLine "---------- 功能菜单 ----------" Cyan
     Write-Host ""
-    Write-Host "  [1] 替换人名（还原历史原名）"
-    Write-Host "  [2] 验证人名替换结果"
-    Write-Host "  [3] 还原人名为游戏原始版本"
-    Write-Host "  [4] 替换字幕（还原历史原名）"
-    Write-Host "  [5] 验证字幕替换结果"
-    Write-Host "  [6] 还原字幕为游戏原始版本"
-    Write-Host "  [7] 退出"
+    Write-Host "  [1] 一键替换（人名 + 字幕）"
+    Write-Host "  [2] 一键验证（人名 + 字幕）"
+    Write-Host "  [3] 一键还原（人名 + 字幕）"
+    Write-Host "  [4] 退出"
     Write-Host ""
-    $action = Read-Host "请选择操作 (1-7)"
+    $action = Read-Host "请选择操作 (1-4)"
 
     switch ($action) {
         "1" {
             Write-Host ""
             Invoke-ReplaceNames -CfgPath $cfgPath
             Write-Host ""
+            Invoke-ReplaceSubtitles -GameDir $gameDir
+            Write-Host ""
         }
         "2" {
             Write-Host ""
             Invoke-VerifyNames -CfgPath $cfgPath
             Write-Host ""
+            Invoke-VerifySubtitles -GameDir $gameDir
+            Write-Host ""
         }
         "3" {
             Write-Host ""
-            $confirm = Read-Host "确认还原人名为游戏原始版本？(Y/N)"
+            $confirm = Read-Host "确认还原为游戏原始版本？(Y/N)"
             if ($confirm -eq "Y" -or $confirm -eq "y") {
                 Invoke-RestoreNames -CfgPath $cfgPath
+                Write-Host ""
+                Invoke-RestoreSubtitles -GameDir $gameDir
             } else {
                 Write-Host "已取消"
             }
@@ -663,32 +666,12 @@ while ($true) {
         }
         "4" {
             Write-Host ""
-            Invoke-ReplaceSubtitles -GameDir $gameDir
-            Write-Host ""
-        }
-        "5" {
-            Write-Host ""
-            Invoke-VerifySubtitles -GameDir $gameDir
-            Write-Host ""
-        }
-        "6" {
-            Write-Host ""
-            $confirm = Read-Host "确认还原字幕为游戏原始版本？(Y/N)"
-            if ($confirm -eq "Y" -or $confirm -eq "y") {
-                Invoke-RestoreSubtitles -GameDir $gameDir
-            } else {
-                Write-Host "已取消"
-            }
-            Write-Host ""
-        }
-        "7" {
-            Write-Host ""
             Write-ColorLine "再见!" Cyan
             Write-Host ""
             exit 0
         }
         default {
-            Write-ColorLine "无效输入，请输入 1-7" Yellow
+            Write-ColorLine "无效输入，请输入 1-4" Yellow
             Write-Host ""
         }
     }
