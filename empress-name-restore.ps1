@@ -18,28 +18,23 @@
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
 # ============================================================
-# 替换映射表
+# 替换映射表 (从 name_mapping.json 读取)
 # ============================================================
-$NameMapping = @(
-    @{ From = "伍";     To = "武";     Desc = "武氏姓氏(单字替换)" },
-    @{ From = "礼治";   To = "李治";   FromTrad = "禮治";   Desc = "唐高宗" },
-    @{ From = "礼世民"; To = "李世民"; FromTrad = "禮世民"; Desc = "唐太宗" },
-    @{ From = "礼泰";   To = "李泰";   FromTrad = "禮泰";   Desc = "魏王" },
-    @{ From = "礼弘";   To = "李弘";   FromTrad = "禮弘";   Desc = "太子" },
-    @{ From = "礼贤";   To = "李贤";   FromTrad = "禮賢";   ToTrad = "李賢"; Desc = "章怀太子" },
-    @{ From = "礼显";   To = "李显";   FromTrad = "禮顯";   ToTrad = "李顯"; Desc = "唐中宗" },
-    @{ From = "礼旦";   To = "李旦";   FromTrad = "禮旦";   Desc = "唐睿宗" },
-    @{ From = "礼勣";   To = "李勣";   FromTrad = "禮勣";   Desc = "凌烟阁功臣" },
-    @{ From = "礼敬业"; To = "徐敬业"; FromTrad = "禮敬業"; ToTrad = "徐敬業"; Desc = "起兵反武之人" },
-    @{ From = "礼氏";   To = "李氏";   FromTrad = "禮氏"; Desc = "李唐皇族(宗族)" },
-    @{ From = "高扬";   To = "高阳";   FromTrad = "高揚";   ToTrad = "高陽"; Desc = "高阳公主" },
-    @{ From = "上官宜"; To = "上官仪"; ToTrad = "上官儀"; Desc = "太子太傅" },
-    @{ From = "楚遂良"; To = "褚遂良"; Desc = "宰相" },
-    @{ From = "丘神绩"; To = "丘神勣"; FromTrad = "丘神績"; Desc = "将领" },
-    @{ From = "狄任介"; To = "狄仁杰"; ToTrad = "狄仁傑"; Desc = "朝臣" },
-    @{ From = "盛朝";   To = "唐朝";   Desc = "国号" },
-    @{ From = "盛安";   To = "长安";   ToTrad = "長安"; Desc = "首都" }
-)
+$MappingFile = Join-Path $PSScriptRoot "name_mapping.json"
+if (-not (Test-Path -LiteralPath $MappingFile)) {
+    Write-ColorLine "[错误] 未找到 name_mapping.json" Red
+    Read-Host "按回车退出"
+    exit 1
+}
+$MappingJson = Get-Content -LiteralPath $MappingFile -Raw -Encoding UTF8 | ConvertFrom-Json
+$NameMapping = @()
+foreach ($entry in $MappingJson.replacements) {
+    $h = @{ From = $entry.from; To = $entry.to; Desc = $entry.desc }
+    if ($entry.fromTrad) { $h.FromTrad = $entry.fromTrad }
+    if ($entry.toTrad)   { $h.ToTrad = $entry.toTrad }
+    $NameMapping += $h
+}
+Write-Host "[映射] 已从 name_mapping.json 加载 $($NameMapping.Count) 对替换规则"
 
 # ============================================================
 # 辅助函数
