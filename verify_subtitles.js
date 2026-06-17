@@ -12,6 +12,7 @@ console.log('=== 《女王的游戏：盛世天下》女帝篇 - 字幕替换验
 // Build replacement pairs
 const simpPairs = [];
 const tradPairs = [];
+const simpPairsNoTrad = [];
 
 for (const entry of replacements) {
   simpPairs.push({ from: entry.from, to: entry.to, desc: entry.desc });
@@ -19,6 +20,8 @@ for (const entry of replacements) {
   if (entry.fromTrad) {
     const toTrad = entry.toTrad || entry.to;
     tradPairs.push({ from: entry.fromTrad, to: toTrad, desc: entry.desc });
+  } else {
+    simpPairsNoTrad.push({ from: entry.from, to: entry.to, desc: entry.desc });
   }
 }
 
@@ -69,7 +72,7 @@ for (const { from, to, desc } of simpPairs) {
 }
 
 // Check zh_TW (traditional)
-for (const { from, to, desc } of tradPairs) {
+for (const { from, to, desc } of [...tradPairs, ...simpPairsNoTrad]) {
   let fromCount = 0;
   let toCount = 0;
 

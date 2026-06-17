@@ -46,6 +46,7 @@ if (!fs.existsSync(BACKUP_DIR)) {
 console.log('--- 构建替换对 ---');
 const simpPairs = [];  // from→to (for zh_GL)
 const tradPairs = [];  // fromTrad→toTrad (for zh_TW)
+const simpPairsNoTrad = [];  // entries without fromTrad (same form in zh_TW)
 
 for (const entry of replacements) {
   simpPairs.push({ from: entry.from, to: entry.to, desc: entry.desc });
@@ -53,14 +54,16 @@ for (const entry of replacements) {
   if (entry.fromTrad) {
     const toTrad = entry.toTrad || entry.to;
     tradPairs.push({ from: entry.fromTrad, to: toTrad, desc: entry.desc });
+  } else {
+    simpPairsNoTrad.push({ from: entry.from, to: entry.to, desc: entry.desc });
   }
 }
 
-console.log('[检查] 简体替换对: ' + simpPairs.length + ', 繁体替换对: ' + tradPairs.length + '\n');
+console.log('[检查] 简体替换对: ' + simpPairs.length + ', 繁体替换对: ' + tradPairs.length + ', 通用替换对: ' + simpPairsNoTrad.length + '\n');
 
 // 3. Process SRT files
 const langs = [
-  { dir: 'zh_TW', pairs: tradPairs, name: '繁体' },
+  { dir: 'zh_TW', pairs: [...tradPairs, ...simpPairsNoTrad], name: '繁体' },
   { dir: 'zh_GL', pairs: simpPairs, name: '简体' }
 ];
 

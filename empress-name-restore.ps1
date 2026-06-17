@@ -402,18 +402,23 @@ function Invoke-ReplaceSubtitles {
     # 2. Build pairs
     $simpPairs = @()
     $tradPairs = @()
+    $simpPairsNoTrad = @()  # entries without fromTrad (same form in zh_TW)
 
     foreach ($entry in $NameMapping) {
         $simpPairs += @{ From = $entry.From; To = $entry.To; Desc = $entry.Desc }
         if ($entry.FromTrad) {
             $toTrad = if ($entry.ToTrad) { $entry.ToTrad } else { $entry.To }
             $tradPairs += @{ From = $entry.FromTrad; To = $toTrad; Desc = $entry.Desc }
+        } else {
+            $simpPairsNoTrad += @{ From = $entry.From; To = $entry.To; Desc = $entry.Desc }
         }
     }
 
     # 3. Process files
+    # zh_TW: tradPairs (繁体源→繁体目标) + simpPairsNoTrad (无繁体变体，简繁同形)
+    # zh_GL: simpPairs (简体源→简体目标)
     $langConfigs = @(
-        @{ Dir = 'zh_TW'; Pairs = $tradPairs; Name = '繁体' },
+        @{ Dir = 'zh_TW'; Pairs = ($tradPairs + $simpPairsNoTrad); Name = '繁体' },
         @{ Dir = 'zh_GL'; Pairs = $simpPairs; Name = '简体' }
     )
 
@@ -482,12 +487,15 @@ function Invoke-VerifySubtitles {
     # Build pairs
     $simpPairs = @()
     $tradPairs = @()
+    $simpPairsNoTrad = @()
 
     foreach ($entry in $NameMapping) {
         $simpPairs += @{ From = $entry.From; To = $entry.To; Desc = $entry.Desc }
         if ($entry.FromTrad) {
             $toTrad = if ($entry.ToTrad) { $entry.ToTrad } else { $entry.To }
             $tradPairs += @{ From = $entry.FromTrad; To = $toTrad; Desc = $entry.Desc }
+        } else {
+            $simpPairsNoTrad += @{ From = $entry.From; To = $entry.To; Desc = $entry.Desc }
         }
     }
 
@@ -515,7 +523,7 @@ function Invoke-VerifySubtitles {
     }
 
     # Check zh_TW
-    foreach ($pair in $tradPairs) {
+    foreach ($pair in ($tradPairs + $simpPairsNoTrad)) {
         $fromCount = 0
         foreach ($file in $zhTWFiles) {
             $content = [System.IO.File]::ReadAllText($file, [System.Text.Encoding]::UTF8)
