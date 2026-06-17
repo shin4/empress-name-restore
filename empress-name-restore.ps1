@@ -21,13 +21,7 @@ $OutputEncoding = [System.Text.Encoding]::UTF8
 # 替换映射表
 # ============================================================
 $NameMapping = @(
-    @{ From = "伍元照"; To = "武则天"; ToTrad = "武則天"; Desc = "女主角本名" },
-    @{ From = "伍媚娘"; To = "武媚娘"; Desc = "女主角封号" },
-    @{ From = "伍士彟"; To = "武士彟"; Desc = "武则天之父" },
-    @{ From = "伍士渊"; To = "武士彟"; Desc = "武则天之父(异写)" },
-    @{ From = "伍元庆"; To = "武元庆"; ToTrad = "武元慶"; Desc = "武则天大哥" },
-    @{ From = "伍元爽"; To = "武元爽"; Desc = "武则天二哥" },
-    @{ From = "伍元顺"; To = "武元顺"; ToTrad = "武元順"; Desc = "武则天长姐" },
+    @{ From = "伍";     To = "武";     Desc = "武氏姓氏(单字替换)" },
     @{ From = "礼治";   To = "李治";   FromTrad = "禮治";   Desc = "唐高宗" },
     @{ From = "礼世民"; To = "李世民"; FromTrad = "禮世民"; Desc = "唐太宗" },
     @{ From = "礼泰";   To = "李泰";   FromTrad = "禮泰";   Desc = "魏王" },
@@ -37,16 +31,14 @@ $NameMapping = @(
     @{ From = "礼旦";   To = "李旦";   FromTrad = "禮旦";   Desc = "唐睿宗" },
     @{ From = "礼勣";   To = "李勣";   FromTrad = "禮勣";   Desc = "凌烟阁功臣" },
     @{ From = "礼敬业"; To = "徐敬业"; FromTrad = "禮敬業"; ToTrad = "徐敬業"; Desc = "起兵反武之人" },
+    @{ From = "礼氏";   To = "李氏";   FromTrad = "禮氏"; Desc = "李唐皇族(宗族)" },
     @{ From = "高扬";   To = "高阳";   FromTrad = "高揚";   ToTrad = "高陽"; Desc = "高阳公主" },
     @{ From = "上官宜"; To = "上官仪"; ToTrad = "上官儀"; Desc = "太子太傅" },
     @{ From = "楚遂良"; To = "褚遂良"; Desc = "宰相" },
     @{ From = "丘神绩"; To = "丘神勣"; FromTrad = "丘神績"; Desc = "将领" },
     @{ From = "狄任介"; To = "狄仁杰"; ToTrad = "狄仁傑"; Desc = "朝臣" },
     @{ From = "盛朝";   To = "唐朝";   Desc = "国号" },
-    @{ From = "盛安";   To = "长安";   ToTrad = "長安"; Desc = "首都" },
-    @{ From = "伍氏";   To = "武氏";   Desc = "武氏家族(宗族)" },
-    @{ From = "礼氏";   To = "李氏";   FromTrad = "禮氏"; Desc = "李唐皇族(宗族)" },
-    @{ From = "伍周";   To = "武周";   Desc = "武周朝代" }
+    @{ From = "盛安";   To = "长安";   ToTrad = "長安"; Desc = "首都" }
 )
 
 # ============================================================
@@ -364,7 +356,7 @@ $host.UI.RawUI.WindowTitle = "女帝篇 — 和谐人名还原工具"
 Write-Host ""
 Write-ColorLine "============================================" Cyan
 Write-ColorLine "  《女王的游戏：盛世天下》女帝篇" Cyan
-Write-ColorLine "      和谐人名还原工具 v1.6" Cyan
+Write-ColorLine "      和谐人名还原工具 v1.7" Cyan
 Write-ColorLine "============================================" Cyan
 Write-Host ""
 
