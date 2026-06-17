@@ -343,6 +343,232 @@ function Invoke-RestoreNames {
 }
 
 # ============================================================
+# 字幕替换功能
+# ============================================================
+
+function Get-SrtFiles {
+    param([string]$Dir)
+    $files = @()
+    if (-not (Test-Path -LiteralPath $Dir)) { return $files }
+    $items = Get-ChildItem -LiteralPath $Dir -Recurse -Filter "*.srt" -File
+    return $items.FullName
+}
+
+function Invoke-ReplaceSubtitles {
+    param([string]$GameDir)
+
+    $srtDir = Join-Path $GameDir "Data\StreamingAssets\res\main\SSTX2\Global\srt"
+    $backupDir = Join-Path $srtDir "_backup_subtitles"
+
+    if (-not (Test-Path -LiteralPath $srtDir)) {
+        Write-ColorLine "[错误] 未找到字幕目录: $srtDir" Red
+        return
+    }
+
+    # 1. Backup
+    if (-not (Test-Path -LiteralPath $backupDir)) {
+        New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
+        $langs = @('zh_TW', 'zh_GL')
+        $totalFiles = 0
+
+        foreach ($lang in $langs) {
+            $langDir = Join-Path $srtDir $lang
+            if (-not (Test-Path -LiteralPath $langDir)) { continue }
+
+            $backupLangDir = Join-Path $backupDir $lang
+            New-Item -ItemType Directory -Path $backupLangDir -Force | Out-Null
+
+            $files = Get-SrtFiles -Dir $langDir
+            foreach ($file in $files) {
+                $relativePath = $file.Substring($langDir.Length + 1)
+                $backupFile = Join-Path $backupLangDir $relativePath
+                $backupSubDir = Split-Path $backupFile -Parent
+                if (-not (Test-Path -LiteralPath $backupSubDir)) {
+                    New-Item -ItemType Directory -Path $backupSubDir -Force | Out-Null
+                }
+                Copy-Item -LiteralPath $file -Destination $backupFile -Force
+                $totalFiles++
+            }
+        }
+        Write-ColorLine "[备份] 已备份 $totalFiles 个字幕文件到 _backup_subtitles" Green
+    } else {
+        Write-ColorLine "[备份] 备份已存在，跳过" Yellow
+    }
+
+    # 2. Build pairs
+    $simpPairs = @()
+    $tradPairs = @()
+
+    foreach ($entry in $NameMapping) {
+        $simpPairs += @{ From = $entry.From; To = $entry.To; Desc = $entry.Desc }
+        if ($entry.FromTrad) {
+            $toTrad = if ($entry.ToTrad) { $entry.ToTrad } else { $entry.To }
+            $tradPairs += @{ From = $entry.FromTrad; To = $toTrad; Desc = $entry.Desc }
+        }
+    }
+
+    # 3. Process files
+    $langConfigs = @(
+        @{ Dir = 'zh_TW'; Pairs = $tradPairs; Name = '繁体' },
+        @{ Dir = 'zh_GL'; Pairs = $simpPairs; Name = '简体' }
+    )
+
+    $totalReplacements = 0
+    $totalFilesModified = 0
+
+    Write-Host ""
+    Write-ColorLine "--- 开始替换字幕 ---" Cyan
+
+    foreach ($langCfg in $langConfigs) {
+        $langDir = Join-Path $srtDir $langCfg.Dir
+        if (-not (Test-Path -LiteralPath $langDir)) {
+            Write-ColorLine "[跳过] $($langCfg.Dir) 目录不存在" Yellow
+            continue
+        }
+
+        $files = Get-SrtFiles -Dir $langDir
+        $langReplacements = 0
+        $langFilesModified = 0
+
+        foreach ($file in $files) {
+            $content = [System.IO.File]::ReadAllText($file, [System.Text.Encoding]::UTF8)
+            $newContent = $content
+            $fileReplacements = 0
+
+            foreach ($pair in $langCfg.Pairs) {
+                $escaped = [regex]::Escape($pair.From)
+                $count = ([regex]::Matches($newContent, $escaped)).Count
+                if ($count -gt 0) {
+                    $newContent = $newContent -replace $escaped, $pair.To
+                    $fileReplacements += $count
+                }
+            }
+
+            if ($fileReplacements -gt 0) {
+                [System.IO.File]::WriteAllText($file, $newContent, [System.Text.Encoding]::UTF8)
+                $langReplacements += $fileReplacements
+                $langFilesModified++
+                $totalReplacements += $fileReplacements
+                $totalFilesModified++
+            }
+        }
+
+        Write-ColorLine "[修改] $($langCfg.Dir) ($($langCfg.Name)): $langFilesModified 个文件, $langReplacements 处替换" White
+    }
+
+    Write-Host ""
+    Write-ColorLine "=== 字幕替换完成 ===" Green
+    Write-ColorLine "修改文件: $totalFilesModified 个" Green
+    Write-ColorLine "替换总数: $totalReplacements 处" Green
+}
+
+function Invoke-VerifySubtitles {
+    param([string]$GameDir)
+
+    $srtDir = Join-Path $GameDir "Data\StreamingAssets\res\main\SSTX2\Global\srt"
+
+    if (-not (Test-Path -LiteralPath $srtDir)) {
+        Write-ColorLine "[错误] 未找到字幕目录" Red
+        return
+    }
+
+    Write-ColorLine "--- 验证字幕替换结果 ---" Cyan
+    Write-Host ""
+
+    # Build pairs
+    $simpPairs = @()
+    $tradPairs = @()
+
+    foreach ($entry in $NameMapping) {
+        $simpPairs += @{ From = $entry.From; To = $entry.To; Desc = $entry.Desc }
+        if ($entry.FromTrad) {
+            $toTrad = if ($entry.ToTrad) { $entry.ToTrad } else { $entry.To }
+            $tradPairs += @{ From = $entry.FromTrad; To = $toTrad; Desc = $entry.Desc }
+        }
+    }
+
+    $zhGLFiles = Get-SrtFiles -Dir (Join-Path $srtDir 'zh_GL')
+    $zhTWFiles = Get-SrtFiles -Dir (Join-Path $srtDir 'zh_TW')
+
+    Write-Host "zh_GL 字幕文件: $($zhGLFiles.Count) 个"
+    Write-Host "zh_TW 字幕文件: $($zhTWFiles.Count) 个"
+    Write-Host ""
+
+    $allPassed = $true
+
+    # Check zh_GL
+    foreach ($pair in $simpPairs) {
+        $fromCount = 0
+        foreach ($file in $zhGLFiles) {
+            $content = [System.IO.File]::ReadAllText($file, [System.Text.Encoding]::UTF8)
+            $fromCount += ([regex]::Matches($content, [regex]::Escape($pair.From))).Count
+        }
+        $status = if ($fromCount -eq 0) { "OK" } else { "FAIL($fromCount)"; $allPassed = $false }
+        $statusColor = if ($fromCount -eq 0) { "Green" } else { "Red" }
+        $line = "{0,-16} {1,-8} {2,-8} " -f $pair.Desc, "zh_GL", $fromCount
+        Write-Host $line -NoNewline
+        Write-ColorLine $status $statusColor
+    }
+
+    # Check zh_TW
+    foreach ($pair in $tradPairs) {
+        $fromCount = 0
+        foreach ($file in $zhTWFiles) {
+            $content = [System.IO.File]::ReadAllText($file, [System.Text.Encoding]::UTF8)
+            $fromCount += ([regex]::Matches($content, [regex]::Escape($pair.From))).Count
+        }
+        $status = if ($fromCount -eq 0) { "OK" } else { "FAIL($fromCount)"; $allPassed = $false }
+        $statusColor = if ($fromCount -eq 0) { "Green" } else { "Red" }
+        $line = "{0,-16} {1,-8} {2,-8} " -f $pair.Desc, "zh_TW", $fromCount
+        Write-Host $line -NoNewline
+        Write-ColorLine $status $statusColor
+    }
+
+    Write-Host ""
+    if ($allPassed) {
+        Write-ColorLine "全部通过! 字幕旧名已全部替换。" Green
+    } else {
+        Write-ColorLine "存在未完成的替换，请重新运行字幕替换。" Red
+    }
+}
+
+function Invoke-RestoreSubtitles {
+    param([string]$GameDir)
+
+    $srtDir = Join-Path $GameDir "Data\StreamingAssets\res\main\SSTX2\Global\srt"
+    $backupDir = Join-Path $srtDir "_backup_subtitles"
+
+    if (-not (Test-Path -LiteralPath $backupDir)) {
+        Write-ColorLine "[错误] 备份目录不存在，无法还原" Red
+        return
+    }
+
+    $langs = @('zh_TW', 'zh_GL')
+    $restored = 0
+
+    foreach ($lang in $langs) {
+        $backupLangDir = Join-Path $backupDir $lang
+        if (-not (Test-Path -LiteralPath $backupLangDir)) { continue }
+
+        $langDir = Join-Path $srtDir $lang
+        $files = Get-SrtFiles -Dir $backupLangDir
+
+        foreach ($file in $files) {
+            $relativePath = $file.Substring($backupLangDir.Length + 1)
+            $dstFile = Join-Path $langDir $relativePath
+            $dstDir = Split-Path $dstFile -Parent
+            if (-not (Test-Path -LiteralPath $dstDir)) {
+                New-Item -ItemType Directory -Path $dstDir -Force | Out-Null
+            }
+            Copy-Item -LiteralPath $file -Destination $dstFile -Force
+            $restored++
+        }
+    }
+
+    Write-ColorLine "[还原] 已恢复 $restored 个字幕文件到原始状态" Green
+}
+
+# ============================================================
 # 主程序
 # ============================================================
 
@@ -351,7 +577,7 @@ $host.UI.RawUI.WindowTitle = "女帝篇 — 和谐人名还原工具"
 Write-Host ""
 Write-ColorLine "============================================" Cyan
 Write-ColorLine "  《女王的游戏：盛世天下》女帝篇" Cyan
-Write-ColorLine "      和谐人名还原工具 v1.7" Cyan
+Write-ColorLine "      和谐人名还原工具 v2.0" Cyan
 Write-ColorLine "============================================" Cyan
 Write-Host ""
 
@@ -405,11 +631,14 @@ while ($true) {
     Write-ColorLine "---------- 功能菜单 ----------" Cyan
     Write-Host ""
     Write-Host "  [1] 替换人名（还原历史原名）"
-    Write-Host "  [2] 验证替换结果"
-    Write-Host "  [3] 还原为游戏原始版本"
-    Write-Host "  [4] 退出"
+    Write-Host "  [2] 验证人名替换结果"
+    Write-Host "  [3] 还原人名为游戏原始版本"
+    Write-Host "  [4] 替换字幕（还原历史原名）"
+    Write-Host "  [5] 验证字幕替换结果"
+    Write-Host "  [6] 还原字幕为游戏原始版本"
+    Write-Host "  [7] 退出"
     Write-Host ""
-    $action = Read-Host "请选择操作 (1-4)"
+    $action = Read-Host "请选择操作 (1-7)"
 
     switch ($action) {
         "1" {
@@ -424,7 +653,7 @@ while ($true) {
         }
         "3" {
             Write-Host ""
-            $confirm = Read-Host "确认还原为游戏原始版本？(Y/N)"
+            $confirm = Read-Host "确认还原人名为游戏原始版本？(Y/N)"
             if ($confirm -eq "Y" -or $confirm -eq "y") {
                 Invoke-RestoreNames -CfgPath $cfgPath
             } else {
@@ -434,12 +663,32 @@ while ($true) {
         }
         "4" {
             Write-Host ""
+            Invoke-ReplaceSubtitles -GameDir $gameDir
+            Write-Host ""
+        }
+        "5" {
+            Write-Host ""
+            Invoke-VerifySubtitles -GameDir $gameDir
+            Write-Host ""
+        }
+        "6" {
+            Write-Host ""
+            $confirm = Read-Host "确认还原字幕为游戏原始版本？(Y/N)"
+            if ($confirm -eq "Y" -or $confirm -eq "y") {
+                Invoke-RestoreSubtitles -GameDir $gameDir
+            } else {
+                Write-Host "已取消"
+            }
+            Write-Host ""
+        }
+        "7" {
+            Write-Host ""
             Write-ColorLine "再见!" Cyan
             Write-Host ""
             exit 0
         }
         default {
-            Write-ColorLine "无效输入，请输入 1-4" Yellow
+            Write-ColorLine "无效输入，请输入 1-7" Yellow
             Write-Host ""
         }
     }

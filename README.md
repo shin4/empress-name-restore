@@ -63,22 +63,31 @@
 4. 工具会自动搜索 Steam 游戏目录，显示菜单：
    ```
    [1] 替换人名（还原历史原名）
-   [2] 验证替换结果
-   [3] 还原为游戏原始版本
-   [4] 退出
+   [2] 验证人名替换结果
+   [3] 还原人名为游戏原始版本
+   [4] 替换字幕（还原历史原名）
+   [5] 验证字幕替换结果
+   [6] 还原字幕为游戏原始版本
+   [7] 退出
    ```
-5. 输入 `1` 回车即可完成替换
+5. 输入 `1` 回车即可完成人名替换，输入 `4` 回车即可完成字幕替换
 
-> 首次运行自动备份原始文件，可随时通过菜单 `[3]` 还原。
+> 首次运行自动备份原始文件，可随时通过菜单 `[3]` 或 `[6]` 还原。
 
 ### 方式二：Node.js 脚本（适合开发者）
 
-需要 [Node.js](https://nodejs.org/)，将 `name_mapping.json`、`replace_names.js`、`restore_names.js`、`verify_names.js` 放入游戏目录后运行：
+需要 [Node.js](https://nodejs.org/)，将脚本文件放入游戏目录后运行：
 
 ```bash
+# 人名替换
 node replace_names.js    # 替换
 node verify_names.js     # 验证
 node restore_names.js    # 还原
+
+# 字幕替换
+node replace_subtitles.js    # 替换
+node verify_subtitles.js     # 验证
+node restore_subtitles.js    # 还原
 ```
 
 ## 工作原理
