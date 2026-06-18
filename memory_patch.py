@@ -32,8 +32,6 @@ kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
 
 SCAN_INTERVAL = 30      # 扫描间隔（秒）
 STARTUP_DELAY = 30      # 检测到游戏后等待加载的时间（秒）
-TRANSITION_COOLDOWN = 10  # 检测到章节切换后冷却时间（秒）
-REGION_CHANGE_THRESHOLD = 0.1  # 区域数量变化超过 10% 视为章节切换
 
 
 class MEMORY_BASIC_INFORMATION(ctypes.Structure):
@@ -53,17 +51,27 @@ class MEMORY_BASIC_INFORMATION(ctypes.Structure):
 
 def load_mapping():
     """加载替换映射表，同时生成 UTF-8 和 UTF-16LE 替换对"""
+    # 搜索顺序：exe 同目录 → exe 父目录（release/场景） → 当前工作目录 → PyInstaller 内嵌
     if getattr(sys, 'frozen', False):
         exe_dir = os.path.dirname(sys.executable)
-        mapping_file = os.path.join(exe_dir, 'name_mapping.json')
-        if not os.path.exists(mapping_file):
-            mapping_file = os.path.join(sys._MEIPASS, 'name_mapping.json')
+        candidates = [
+            os.path.join(exe_dir, 'name_mapping.json'),
+            os.path.join(os.path.dirname(exe_dir), 'name_mapping.json'),
+            os.path.join(os.getcwd(), 'name_mapping.json'),
+            os.path.join(sys._MEIPASS, 'name_mapping.json'),
+        ]
     else:
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        mapping_file = os.path.join(script_dir, 'name_mapping.json')
+        candidates = [
+            os.path.join(script_dir, 'name_mapping.json'),
+            os.path.join(os.getcwd(), 'name_mapping.json'),
+        ]
 
-    if not os.path.exists(mapping_file):
+    mapping_file = next((f for f in candidates if os.path.exists(f)), None)
+
+    if not mapping_file:
         print("[错误] 未找到 name_mapping.json")
+        print(f"  已搜索: {', '.join(candidates[:-1] if getattr(sys, 'frozen', False) else candidates)}")
         sys.exit(1)
 
     print(f"  映射文件: {mapping_file}")
@@ -323,37 +331,6 @@ def scan_and_replace(pid, pairs):
     return total_replacements, total_regions, [], scanned, total_write_ok, total_write_fail, total_verified
 
 
-def count_memory_regions(pid):
-    """快速统计进程的可写内存区域数量，用于检测章节切换"""
-    h_process = kernel32.OpenProcess(PROCESS_QUERY_INFORMATION, False, pid)
-    if not h_process:
-        return -1
-
-    count = 0
-    addr = ctypes.c_ulonglong(0)
-    mbi = MEMORY_BASIC_INFORMATION()
-    mbi_size = ctypes.sizeof(mbi)
-
-    while addr.value < 0x7FFFFFFFFFFF:
-        ret = kernel32.VirtualQueryEx(h_process, addr, ctypes.byref(mbi), mbi_size)
-        if ret == 0:
-            addr.value += 0x1000
-            continue
-        region_size = mbi.RegionSize if mbi.RegionSize else 0
-        if region_size == 0:
-            addr.value += 0x1000
-            continue
-        if (mbi.State == MEM_COMMIT and
-                mbi.Type == MEM_PRIVATE and
-                mbi.Protect in (PAGE_READWRITE, PAGE_WRITECOPY, PAGE_EXECUTE_READWRITE) and
-                256 <= region_size <= 50 * 1024 * 1024):
-            count += 1
-        addr.value = (mbi.BaseAddress or 0) + region_size
-
-    kernel32.CloseHandle(h_process)
-    return count
-
-
 def find_game_process():
     """查找游戏进程，返回 PID 或 None"""
     try:
@@ -373,7 +350,7 @@ def find_game_process():
 
 RAW_VERSION_URL = "https://raw.githubusercontent.com/shin4/empress-name-restore/master/VERSION"
 REPO_URL = "https://github.com/shin4/empress-name-restore"
-LOCAL_VERSION = "3.8"
+LOCAL_VERSION = "3.9"
 
 
 def check_update():
@@ -400,7 +377,7 @@ def check_update():
 
 def main():
     print("=" * 50)
-    print("  女帝篇 字幕还原补丁 v3.8")
+    print("  女帝篇 字幕还原补丁 v3.9")
     print("  运行时内存替换 | Ctrl+C 退出")
     print("=" * 50)
 
@@ -446,7 +423,6 @@ def main():
 
     scan_count = 0
     total_replacements = 0
-    prev_region_count = -1  # 上一次扫描的区域数量
 
     try:
         while True:
@@ -458,20 +434,7 @@ def main():
             if current_pid != pid:
                 print(f"\n\n游戏进程已重启 (PID {pid} -> {current_pid})")
                 pid = current_pid
-                prev_region_count = -1
                 print(f"  继续监控新进程: PID {pid}")
-
-            # 章节切换检测：比较区域数量变化
-            cur_region_count = count_memory_regions(pid)
-            if cur_region_count > 0 and prev_region_count > 0:
-                change_ratio = abs(cur_region_count - prev_region_count) / prev_region_count
-                if change_ratio > REGION_CHANGE_THRESHOLD:
-                    print(f"\n  [!] 检测到内存变化 ({prev_region_count} -> {cur_region_count})，等待稳定...")
-                    time.sleep(TRANSITION_COOLDOWN)
-                    # 冷却后重新计数，用新的基线
-                    prev_region_count = count_memory_regions(pid)
-                    continue
-            prev_region_count = cur_region_count
 
             scan_count += 1
             result = scan_and_replace(pid, pairs)
