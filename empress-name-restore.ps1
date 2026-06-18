@@ -581,6 +581,121 @@ function Invoke-RestoreSubtitles {
 }
 
 # ============================================================
+# 自动更新
+# ============================================================
+
+$RepoUrl = "https://github.com/shin4/empress-name-restore"
+$RawBaseUrl = "https://raw.githubusercontent.com/shin4/empress-name-restore/master"
+$LocalVersionFile = Join-Path $PSScriptRoot "VERSION"
+
+function Get-LocalVersion {
+    if (Test-Path -LiteralPath $LocalVersionFile) {
+        return (Get-Content -LiteralPath $LocalVersionFile -Raw -Encoding UTF8).Trim()
+    }
+    return "0.0"
+}
+
+function Compare-Version {
+    param([string]$V1, [string]$V2)
+    $parts1 = $V1.Split('.') | ForEach-Object { [int]$_ }
+    $parts2 = $V2.Split('.') | ForEach-Object { [int]$_ }
+    $len = [Math]::Max($parts1.Count, $parts2.Count)
+    for ($i = 0; $i -lt $len; $i++) {
+        $a = if ($i -lt $parts1.Count) { $parts1[$i] } else { 0 }
+        $b = if ($i -lt $parts2.Count) { $parts2[$i] } else { 0 }
+        if ($a -gt $b) { return 1 }
+        if ($a -lt $b) { return -1 }
+    }
+    return 0
+}
+
+function Check-Update {
+    param([bool]$Silent = $false)
+
+    $localVer = Get-LocalVersion
+
+    try {
+        $remoteVer = (Invoke-WebRequest -Uri "$RawBaseUrl/VERSION" -UseBasicParsing -TimeoutSec 5 -ErrorAction Stop).Content.Trim()
+    } catch {
+        if (-not $Silent) {
+            Write-ColorLine "[更新] 无法检查更新（网络不可用）" Yellow
+        }
+        return
+    }
+
+    $cmp = Compare-Version -V1 $remoteVer -V2 $localVer
+    if ($cmp -le 0) {
+        if (-not $Silent) {
+            Write-ColorLine "[更新] 当前已是最新版本 v$localVer" Green
+        }
+        return
+    }
+
+    Write-ColorLine "[更新] 发现新版本 v$remoteVer (当前 v$localVer)" Yellow
+    $choice = Read-Host "是否下载更新？(Y/N)"
+    if ($choice -ne "Y" -and $choice -ne "y") {
+        Write-Host "已跳过更新"
+        return
+    }
+
+    # 下载 ZIP
+    $zipUrl = "$RepoUrl/archive/refs/heads/master.zip"
+    $tempZip = Join-Path $env:TEMP "empress-name-restore-update.zip"
+    $tempDir = Join-Path $env:TEMP "empress-name-restore-update"
+
+    Write-Host "正在下载..."
+    try {
+        Invoke-WebRequest -Uri $zipUrl -OutFile $tempZip -UseBasicParsing -TimeoutSec 60 -ErrorAction Stop
+    } catch {
+        Write-ColorLine "[错误] 下载失败: $($_.Exception.Message)" Red
+        Write-Host "请手动下载: $RepoUrl"
+        return
+    }
+
+    # 解压
+    Write-Host "正在解压..."
+    if (Test-Path -LiteralPath $tempDir) { Remove-Item -LiteralPath $tempDir -Recurse -Force }
+    Expand-Archive -Path $tempZip -DestinationPath $tempDir -Force
+
+    # 找到解压后的子目录（GitHub ZIP 会有一层 empress-name-restore-master/）
+    $extractedDir = Get-ChildItem -LiteralPath $tempDir -Directory | Select-Object -First 1
+    if (-not $extractedDir) {
+        Write-ColorLine "[错误] 解压失败" Red
+        return
+    }
+
+    # 复制文件覆盖本地（跳过备份目录和 .git）
+    $skipDirs = @("_backup_original", "_backup_subtitles", ".git")
+    $copied = 0
+    Get-ChildItem -LiteralPath $extractedDir.FullName -Recurse -File | ForEach-Object {
+        $relativePath = $_.FullName.Substring($extractedDir.FullName.Length + 1)
+        $skip = $false
+        foreach ($sd in $skipDirs) {
+            if ($relativePath -like "$sd*") { $skip = $true; break }
+        }
+        if (-not $skip) {
+            $destPath = Join-Path $PSScriptRoot $relativePath
+            $destDir = Split-Path $destPath -Parent
+            if (-not (Test-Path -LiteralPath $destDir)) {
+                New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+            }
+            Copy-Item -LiteralPath $_.FullName -Destination $destPath -Force
+            $copied++
+        }
+    }
+
+    # 清理临时文件
+    Remove-Item -LiteralPath $tempZip -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+
+    Write-ColorLine "[更新] 更新完成！已更新 $copied 个文件" Green
+    Write-ColorLine "[更新] 请重新启动本工具以使用新版本" Yellow
+    Write-Host ""
+    Read-Host "按回车退出"
+    exit 0
+}
+
+# ============================================================
 # 主程序
 # ============================================================
 
@@ -589,9 +704,12 @@ $host.UI.RawUI.WindowTitle = "女帝篇 — 和谐人名还原工具"
 Write-Host ""
 Write-ColorLine "============================================" Cyan
 Write-ColorLine "  《女王的游戏：盛世天下》女帝篇" Cyan
-Write-ColorLine "      和谐人名还原工具 v3.6" Cyan
+Write-ColorLine "      和谐人名还原工具 v3.7" Cyan
 Write-ColorLine "============================================" Cyan
 Write-Host ""
+
+# 启动时自动检查更新（静默模式，不打扰正常流程）
+Check-Update -Silent $true
 
 # 自动搜索游戏目录
 Write-ColorLine "正在搜索游戏目录..." Yellow
@@ -646,9 +764,10 @@ while ($true) {
     Write-Host "  [2] 一键验证（人名 + 字幕）"
     Write-Host "  [3] 一键还原（人名 + 字幕）"
     Write-Host "  [4] 启动内存补丁（字幕实时替换）"
-    Write-Host "  [5] 退出"
+    Write-Host "  [5] 检查更新"
+    Write-Host "  [6] 退出"
     Write-Host ""
-    $action = Read-Host "请选择操作 (1-5)"
+    $action = Read-Host "请选择操作 (1-6)"
 
     switch ($action) {
         "1" {
@@ -703,12 +822,17 @@ while ($true) {
         }
         "5" {
             Write-Host ""
+            Check-Update -Silent $false
+            Write-Host ""
+        }
+        "6" {
+            Write-Host ""
             Write-ColorLine "再见!" Cyan
             Write-Host ""
             exit 0
         }
         default {
-            Write-ColorLine "无效输入，请输入 1-5" Yellow
+            Write-ColorLine "无效输入，请输入 1-6" Yellow
             Write-Host ""
         }
     }

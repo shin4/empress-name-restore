@@ -11,6 +11,7 @@ import os
 import subprocess
 import sys
 import time
+import urllib.request
 
 # Windows API 常量
 PROCESS_VM_READ = 0x0010
@@ -370,19 +371,50 @@ def find_game_process():
     return None
 
 
+RAW_VERSION_URL = "https://raw.githubusercontent.com/shin4/empress-name-restore/master/VERSION"
+REPO_URL = "https://github.com/shin4/empress-name-restore"
+LOCAL_VERSION = "3.7"
+
+
+def check_update():
+    """检查 GitHub 是否有新版本"""
+    try:
+        resp = urllib.request.urlopen(RAW_VERSION_URL, timeout=5)
+        remote_ver = resp.read().decode('utf-8').strip()
+    except Exception:
+        return
+
+    def parse_ver(v):
+        return [int(x) for x in v.split('.')]
+
+    try:
+        rv = parse_ver(remote_ver)
+        lv = parse_ver(LOCAL_VERSION)
+    except Exception:
+        return
+
+    if rv > lv:
+        print(f"\n  [更新] 发现新版本 v{remote_ver} (当前 v{LOCAL_VERSION})")
+        print(f"  请从 GitHub 下载: {REPO_URL}")
+
+
 def main():
     print("=" * 50)
-    print("  女帝篇 字幕还原补丁 v3.6")
+    print("  女帝篇 字幕还原补丁 v3.7")
     print("  运行时内存替换 | Ctrl+C 退出")
     print("=" * 50)
 
     # 加载映射
-    print("\n[1/2] 加载映射表...")
+    print("\n[1/3] 加载映射表...")
     pairs = load_mapping()
     print(f"  加载了 {len(pairs)} 个替换对 (UTF-8 + UTF-16LE)")
 
+    # 检查更新
+    print("\n[2/3] 检查更新...")
+    check_update()
+
     # 等待游戏进程
-    print("\n[2/2] 等待游戏进程...")
+    print("\n[3/3] 等待游戏进程...")
     pid = find_game_process()
     if not pid:
         print("  等待游戏启动...")
