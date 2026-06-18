@@ -12,6 +12,7 @@ import subprocess
 import sys
 import time
 import urllib.request
+from collections import Counter
 
 # Windows API 常量
 PROCESS_VM_READ = 0x0010
@@ -30,8 +31,26 @@ PAGE_EXECUTE_READWRITE = 0x40
 
 kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
 
-SCAN_INTERVAL = 30      # 扫描间隔（秒）
+SCAN_INTERVAL = 15      # 扫描间隔（秒）
 STARTUP_DELAY = 30      # 检测到游戏后等待加载的时间（秒）
+
+# ---- IL2CPP System.String 布局（x64，经 probe_il2cpp_strings.py 验证）----
+#   +0x00  Il2CppClass* klass     （所有 String 实例相同）
+#   +0x08  void*    monitor
+#   +0x10  int32_t  length        （字符数，非字节数）
+#   +0x14  char16_t chars[]       （UTF-16LE，紧跟其后）
+IL2CPP_KLASS_OFFSET = 0x00
+IL2CPP_LEN_OFFSET = 0x10
+IL2CPP_CHARS_OFFSET = 0x14
+IL2CPP_ALIGN = 8               # 对象头 8 字节对齐
+IL2CPP_MIN_LEN = 1
+IL2CPP_MAX_LEN = 8192          # 字幕字符串长度上界
+IL2CPP_MAX_BACKSCAN_CU = 4096  # 反向搜索对象头的最大字符距离
+
+# 进程内 System.String klass 是 ASLR 相关的，不能硬编码。
+# 运行时通过 learn_string_klass() 学习一次即可——klass 是 Il2CppClass* 类型元数据
+# 指针，会话内恒定（元数据对象进程启动时分配、不移动；GC 只搬运 String 实例）。
+# 唯一会变的是进程重启（ASLR 重新基址），由 main() 的 PID 变化分支重新学习。
 
 
 class MEMORY_BASIC_INFORMATION(ctypes.Structure):
@@ -107,7 +126,8 @@ def load_mapping():
 
 
 def is_valid_utf8_context(data, offset, match_len, context_size=50):
-    """检查匹配位置周围的上下文是否像有效的 UTF-8 文本"""
+    """检查匹配位置是否在合法的 UTF-8 文本区域"""
+    # 第一道：上下文窗口的非文本字节比例检查
     start = max(0, offset - context_size)
     end = min(len(data), offset + match_len + context_size)
     context = data[start:end]
@@ -120,54 +140,192 @@ def is_valid_utf8_context(data, offset, match_len, context_size=50):
     if non_text_count > len(context) * 0.3:
         return False
 
+    # 第二道：找到匹配位置的 UTF-8 字符边界，只对局部子串做严格解码
+    # 向前扫描到 UTF-8 起始字节（最高两位不是 10xxxxxx）
+    local_start = offset
+    while local_start > 0 and (data[local_start - 1] & 0xC0) == 0x80:
+        local_start -= 1
+    # 如果找到了续接字节，需要再退一步包含它们的起始字节
+    if local_start < offset:
+        local_start = max(0, local_start - 1)
+    # 向后扫描到下一个 UTF-8 起始字节
+    local_end = offset + match_len
+    while local_end < len(data) and (data[local_end] & 0xC0) == 0x80:
+        local_end += 1
+    # 只对字符边界内的子串做严格解码
     try:
-        context.decode('utf-8', errors='strict')
+        data[local_start:local_end].decode('utf-8', errors='strict')
         return True
     except UnicodeDecodeError:
-        try:
-            local_start = max(0, offset - 10)
-            local_end = min(len(data), offset + match_len + 10)
-            data[local_start:local_end].decode('utf-8', errors='strict')
-            return True
-        except UnicodeDecodeError:
-            return False
+        return False
 
 
-def is_valid_utf16le_context(data, offset, match_len, context_size=60):
-    """检查匹配位置是否在 UTF-16LE 文本区域（2字节对齐 + 70% 区域 CJK 比例）"""
-    # UTF-16LE 要求 2 字节对齐
+def _find_il2cpp_string_object(data, match_off, pat_len, string_klass):
+    """反向搜索匹配位置所属的 IL2CPP String 对象头。
+
+    判定自洽的条件（确定性，非概率）：
+      1. 对象头 base 8 字节对齐，且 base = match_off - CHARS_OFFSET 向下对齐
+      2. base+LEN_OFFSET 处 int32 length 满足 IL2CPP_MIN_LEN..IL2CPP_MAX_LEN
+      3. 匹配区间 [match_off, match_off+pat_len) 落在
+         [base+CHARS_OFFSET, base+CHARS_OFFSET + 2*length) 之内
+      4. base 处 8 字节 == string_klass（本进程已学习的 System.String 元数据指针）
+
+    命中返回对象头在 data 内的偏移；否则返回 -1。
+    """
+    n_cu = pat_len // 2
+    data_len = len(data)
+    anchor = match_off - IL2CPP_CHARS_OFFSET
+    if anchor < 0:
+        return -1
+    base = anchor - (anchor % IL2CPP_ALIGN)
+    # 从最接近 anchor 的对齐位置向后退，最多回退 IL2CPP_MAX_BACKSCAN_CU 个字符
+    while base >= 0 and (match_off - IL2CPP_CHARS_OFFSET - base) // 2 <= IL2CPP_MAX_BACKSCAN_CU:
+        # length 字段
+        if base + IL2CPP_LEN_OFFSET + 4 > data_len:
+            base -= IL2CPP_ALIGN
+            continue
+        length = int.from_bytes(
+            data[base + IL2CPP_LEN_OFFSET:base + IL2CPP_LEN_OFFSET + 4],
+            'little', signed=True)
+        if not (IL2CPP_MIN_LEN <= length <= IL2CPP_MAX_LEN):
+            base -= IL2CPP_ALIGN
+            continue
+        # 匹配区间必须落在 chars[] 范围内
+        j = (match_off - IL2CPP_CHARS_OFFSET - base) // 2
+        if j < 0 or j + n_cu > length:
+            base -= IL2CPP_ALIGN
+            continue
+        # klass 字段必须等于本进程已学习的 System.String klass
+        if base + 8 > data_len:
+            base -= IL2CPP_ALIGN
+            continue
+        klass = int.from_bytes(data[base:base + 8], 'little')
+        if klass != string_klass:
+            base -= IL2CPP_ALIGN
+            continue
+        return base
+    return -1
+
+
+def is_valid_utf16le_context(data, offset, match_len, string_klass):
+    """判定 UTF-16LE 匹配是否落在真实 IL2CPP String 对象内。
+
+    用 length 字段 + klass 指针 一致性做确定性判定，彻底取代
+    v3.1~v3.11 的邻居/区域比例判定（前者被 null 终止符误杀，
+    后者无法区分字符串数据与碰巧 CJK 比例高的二进制段，导致崩溃）。
+    """
+    # UTF-16LE 字符必须 2 字节对齐
     if offset % 2 != 0:
         return False
-
-    total_len = len(data)
-
-    # 检查整个上下文区域的 CJK 比例
-    check_start = max(0, offset - context_size)
-    check_end = min(total_len, offset + match_len + context_size)
-    check_start = check_start + (check_start % 2)
-    check_end = check_end - (check_end % 2)
-
-    if check_end - check_start < 4:
-        return False
-
-    code_units = []
-    for i in range(check_start, check_end - 1, 2):
-        code_units.append(data[i] | (data[i + 1] << 8))
-
-    def is_valid_cu(cu):
-        return (cu == 0x0000 or              # null 终止符
-                0x0020 <= cu <= 0x007E or     # ASCII 可见
-                0x2000 <= cu <= 0x206F or     # 通用标点
-                0x3000 <= cu <= 0x303F or     # CJK 标点
-                0x4E00 <= cu <= 0x9FFF or     # CJK 基本
-                0xFE30 <= cu <= 0xFE4F or     # CJK 兼容形式
-                0xFF00 <= cu <= 0xFFEF)        # 全角
-
-    valid = sum(1 for cu in code_units if is_valid_cu(cu))
-    return valid >= len(code_units) * 0.7
+    if string_klass == 0:
+        # klass 尚未学习，回退到 length 自洽（仍远比比例判定安全）
+        return _find_il2cpp_string_object_loose(data, offset, match_len) >= 0
+    return _find_il2cpp_string_object(data, offset, match_len, string_klass) >= 0
 
 
-def scan_and_replace(pid, pairs):
+def _find_il2cpp_string_object_loose(data, match_off, pat_len):
+    """klass 未学习时的降级判定：仅 length 自洽 + klass 是合法高位指针。"""
+    n_cu = pat_len // 2
+    data_len = len(data)
+    anchor = match_off - IL2CPP_CHARS_OFFSET
+    if anchor < 0:
+        return -1
+    base = anchor - (anchor % IL2CPP_ALIGN)
+    while base >= 0 and (match_off - IL2CPP_CHARS_OFFSET - base) // 2 <= IL2CPP_MAX_BACKSCAN_CU:
+        if base + IL2CPP_LEN_OFFSET + 4 > data_len:
+            base -= IL2CPP_ALIGN
+            continue
+        length = int.from_bytes(
+            data[base + IL2CPP_LEN_OFFSET:base + IL2CPP_LEN_OFFSET + 4],
+            'little', signed=True)
+        if not (IL2CPP_MIN_LEN <= length <= IL2CPP_MAX_LEN):
+            base -= IL2CPP_ALIGN
+            continue
+        j = (match_off - IL2CPP_CHARS_OFFSET - base) // 2
+        if j < 0 or j + n_cu > length:
+            base -= IL2CPP_ALIGN
+            continue
+        if base + 8 > data_len:
+            base -= IL2CPP_ALIGN
+            continue
+        klass = int.from_bytes(data[base:base + 8], 'little')
+        # 用户态高位指针范围（排除 0、小整数、内核态地址）
+        if 0x10000 < klass < 0x7FFFFFFFFFFF:
+            return base
+        base -= IL2CPP_ALIGN
+    return -1
+
+
+def learn_string_klass(pid, pairs):
+    """运行时学习本进程的 System.String klass 指针。
+
+    只读扫描全部候选区域，对每个 UTF-16LE 模式匹配位置，用 length 自洽
+    反推对象头并统计 klass 频次。真 String klass 会被成百上千个字符串
+    实例引用（高频集中），噪声 klass 各不相同（频次 1）。
+    返回 Top1 klass（int），无结果返回 0。
+    """
+    h_process = kernel32.OpenProcess(
+        PROCESS_VM_READ | PROCESS_QUERY_INFORMATION, False, pid)
+    if not h_process:
+        return 0
+
+    klass_counter = Counter()
+    utf16_patterns = [p for p in pairs if p[3] == 'utf16']
+
+    try:
+        addr = ctypes.c_ulonglong(0)
+        mbi = MEMORY_BASIC_INFORMATION()
+        mbi_size = ctypes.sizeof(mbi)
+        while addr.value < 0x7FFFFFFFFFFF:
+            if kernel32.VirtualQueryEx(h_process, addr, ctypes.byref(mbi), mbi_size) == 0:
+                addr.value += 0x1000
+                continue
+            base = mbi.BaseAddress or 0
+            region_size = mbi.RegionSize or 0
+            if region_size == 0:
+                addr.value += 0x1000
+                continue
+            if (mbi.State == MEM_COMMIT and mbi.Type == MEM_PRIVATE and
+                    mbi.Protect in (PAGE_READWRITE, PAGE_WRITECOPY, PAGE_EXECUTE_READWRITE) and
+                    256 <= region_size <= 50 * 1024 * 1024):
+                try:
+                    buffer = ctypes.create_string_buffer(region_size)
+                    bytes_read = ctypes.c_size_t(0)
+                    if kernel32.ReadProcessMemory(
+                            h_process, ctypes.c_void_p(base),
+                            buffer, region_size, ctypes.byref(bytes_read)):
+                        data = bytearray(buffer.raw[:bytes_read.value])
+                        for from_buf, _to, _desc, _enc in utf16_patterns:
+                            idx = 0
+                            while True:
+                                idx = data.find(from_buf, idx)
+                                if idx == -1:
+                                    break
+                                # 仅用 length 自洽 + 合法指针范围收集候选 klass
+                                ob = _find_il2cpp_string_object_loose(
+                                    data, idx, len(from_buf))
+                                if ob >= 0:
+                                    klass = int.from_bytes(
+                                        data[ob:ob + 8], 'little')
+                                    klass_counter[klass] += 1
+                                idx += len(from_buf)
+                except Exception:
+                    pass
+            addr.value = base + region_size
+    finally:
+        kernel32.CloseHandle(h_process)
+
+    if not klass_counter:
+        return 0
+    top_klass, top_count = klass_counter.most_common(1)[0]
+    # 真 klass 应明显集中；若 Top1 只出现 1 次（无任何字符串重复），仍采用它，
+    # 因为长度自洽 + 合法指针已经是强约束。
+    print(f"  [klass] 学习到 System.String klass = 0x{top_klass:012X} "
+          f"(共 {len(klass_counter)} 种, Top1 命中 {top_count} 次)")
+    return top_klass
+
+
+def scan_and_replace(pid, pairs, string_klass):
     """扫描内存并替换（安全模式：先收集补丁，再逐个原子化写入）"""
     h_process = kernel32.OpenProcess(
         PROCESS_VM_READ | PROCESS_VM_WRITE | PROCESS_VM_OPERATION | PROCESS_QUERY_INFORMATION,
@@ -236,7 +394,7 @@ def scan_and_replace(pid, pairs):
                             if idx == -1:
                                 break
                             if encoding == 'utf16':
-                                valid = is_valid_utf16le_context(data, idx, len(from_buf))
+                                valid = is_valid_utf16le_context(data, idx, len(from_buf), string_klass)
                             else:
                                 valid = is_valid_utf8_context(data, idx, len(from_buf))
                             if valid:
@@ -331,7 +489,7 @@ def find_game_process():
 
 RAW_VERSION_URL = "https://raw.githubusercontent.com/shin4/empress-name-restore/master/VERSION"
 REPO_URL = "https://github.com/shin4/empress-name-restore"
-LOCAL_VERSION = "3.11"
+LOCAL_VERSION = "3.12.1"
 
 
 def check_update():
@@ -358,8 +516,8 @@ def check_update():
 
 def main():
     print("=" * 50)
-    print("  女帝篇 字幕还原补丁 v3.11")
-    print("  运行时内存替换 | Ctrl+C 退出")
+    print("  女帝篇 字幕还原补丁 v3.12.1")
+    print("  运行时内存替换 | IL2CPP 对象锚定 | Ctrl+C 退出")
     print("=" * 50)
 
     # 加载映射
@@ -399,6 +557,25 @@ def main():
                 if find_game_process() is not None:
                     break
 
+    # 学习本进程的 System.String klass（IL2CPP 对象锚定的关键）
+    # 每次进程（重）启动后都需要重新学习：ASLR 使每次基址不同。
+    # 注意：klass 是 Il2CppClass* 类型元数据指针，会话内恒定（元数据对象进程启动时
+    # 分配一次、不移动；GC 只搬运 String 实例，不改变实例里的 klass 字段）。
+    # 因此【无需周期性重新校准】——唯一会变的是进程重启（ASLR），由下方 PID 变化分支处理。
+    print(f"\n[klass] 学习 System.String klass（IL2CPP 对象锚定）...")
+    string_klass = 0
+    for attempt in range(1, 4):   # 最多重试 3 次，应对启动时当前章节恰好无人名
+        string_klass = learn_string_klass(pid, pairs)
+        if string_klass:
+            break
+        print(f"  [警告] 第 {attempt}/3 次未能采到 klass（当前章节可能不含目标人名）")
+        if attempt < 3:
+            print(f"         等待章节切换后重试（{SCAN_INTERVAL} 秒）...")
+            time.sleep(SCAN_INTERVAL)
+    if string_klass == 0:
+        print("  [警告] 3 次均未能学习 klass，将使用 length 自洽降级判定")
+        print("         （仍比旧版区域比例判定安全；进入含目标人名的章节后会逐步替换）")
+
     print(f"\n开始实时替换 (每 {SCAN_INTERVAL} 秒扫描一次)")
     print("-" * 50)
 
@@ -416,9 +593,21 @@ def main():
                 print(f"\n\n游戏进程已重启 (PID {pid} -> {current_pid})")
                 pid = current_pid
                 print(f"  继续监控新进程: PID {pid}")
+                # 新进程 = 新地址空间，klass 必须重新学习
+                print(f"  [klass] 重新学习 System.String klass...")
+                string_klass = 0
+                for attempt in range(1, 4):
+                    string_klass = learn_string_klass(pid, pairs)
+                    if string_klass:
+                        break
+                    print(f"  [警告] 第 {attempt}/3 次未能采到 klass，等待重试...")
+                    time.sleep(SCAN_INTERVAL)
 
             scan_count += 1
-            result = scan_and_replace(pid, pairs)
+
+            # klass 会话内恒定（见上方说明），无需周期性重新校准。
+
+            result = scan_and_replace(pid, pairs, string_klass)
 
             if result is None:
                 print(f"\n\n无法访问进程，请确认管理员权限")

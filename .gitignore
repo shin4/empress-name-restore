@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# PyInstaller 构建产物
+build/
+dist/
+*.spec
+
+# 临时/诊断脚本
+_*.py
+_*.ps1
+
+# 系统
+Thumbs.db
+.DS_Store
