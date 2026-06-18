@@ -168,7 +168,7 @@ def is_valid_utf16le_context(data, offset, match_len, context_size=60):
 
 
 def scan_and_replace(pid, pairs):
-    """扫描内存并替换（安全模式）"""
+    """扫描内存并替换（安全模式：先收集补丁，再逐个原子化写入）"""
     h_process = kernel32.OpenProcess(
         PROCESS_VM_READ | PROCESS_VM_WRITE | PROCESS_VM_OPERATION | PROCESS_QUERY_INFORMATION,
         False, pid
@@ -192,6 +192,10 @@ def scan_and_replace(pid, pairs):
 
     scanned = 0
     skipped = 0
+
+    # 第一轮：只读扫描，收集所有需要写入的位置
+    # 每个补丁包含 (目标地址, 原始字节, 新字节, 区域基址)
+    pending_patches = []  # list of (base_addr, offset_in_region, old_bytes, new_bytes)
 
     while addr.value < 0x7FFFFFFFFFFF:
         ret = kernel32.VirtualQueryEx(h_process, addr, ctypes.byref(mbi), mbi_size)
@@ -224,9 +228,6 @@ def scan_and_replace(pid, pairs):
                     buffer, region_size, ctypes.byref(bytes_read)
                 ):
                     data = bytearray(buffer.raw[:bytes_read.value])
-                    region_replacements = 0
-                    # 收集需要写入的 (偏移量, 新字节) 列表
-                    patches = []
 
                     for from_buf, to_buf, desc, encoding in pairs:
                         idx = 0
@@ -239,49 +240,9 @@ def scan_and_replace(pid, pairs):
                             else:
                                 valid = is_valid_utf8_context(data, idx, len(from_buf))
                             if valid:
-                                patches.append((idx, bytes(to_buf)))
-                                region_replacements += 1
-                                total_replacements += 1
+                                old_bytes = bytes(data[idx:idx + len(from_buf)])
+                                pending_patches.append((base, idx, old_bytes, bytes(to_buf)))
                             idx += len(from_buf)
-
-                    # 只写入被修改的字节，不回写整个区域
-                    for offset, new_bytes in patches:
-                        target_addr = base + offset
-                        # 写入前重新验证目标内存区域仍然有效
-                        check_mbi = MEMORY_BASIC_INFORMATION()
-                        check_ret = kernel32.VirtualQueryEx(
-                            h_process, ctypes.c_void_p(target_addr),
-                            ctypes.byref(check_mbi), ctypes.sizeof(check_mbi)
-                        )
-                        if check_ret == 0:
-                            total_write_fail += 1
-                            continue
-                        if check_mbi.State != MEM_COMMIT or check_mbi.Protect not in (PAGE_READWRITE, PAGE_WRITECOPY, PAGE_EXECUTE_READWRITE):
-                            total_write_fail += 1
-                            continue
-
-                        write_buf = ctypes.create_string_buffer(new_bytes)
-                        bytes_written = ctypes.c_size_t(0)
-                        ret = kernel32.WriteProcessMemory(
-                            h_process, ctypes.c_void_p(target_addr),
-                            write_buf, len(new_bytes), ctypes.byref(bytes_written)
-                        )
-                        if ret and bytes_written.value == len(new_bytes):
-                            total_write_ok += 1
-                            # 读回验证
-                            verify_buf = ctypes.create_string_buffer(len(new_bytes))
-                            verify_read = ctypes.c_size_t(0)
-                            kernel32.ReadProcessMemory(
-                                h_process, ctypes.c_void_p(target_addr),
-                                verify_buf, len(new_bytes), ctypes.byref(verify_read)
-                            )
-                            if verify_buf.raw[:len(new_bytes)] == new_bytes:
-                                total_verified += 1
-                        else:
-                            total_write_fail += 1
-                    if patches:
-                        total_regions += 1
-                        details.append((hex(base), region_replacements))
 
                 scanned += 1
             except Exception:
@@ -289,9 +250,66 @@ def scan_and_replace(pid, pairs):
 
         addr.value = base + region_size
 
+    # 第二轮：逐个写入，每个写入前重新读取确认原始字节仍在
+    region_set = set()
+    for base, offset, old_bytes, new_bytes in pending_patches:
+        target_addr = base + offset
+        patch_len = len(new_bytes)
+
+        # 1. VirtualQueryEx 确认区域仍有效
+        check_mbi = MEMORY_BASIC_INFORMATION()
+        check_ret = kernel32.VirtualQueryEx(
+            h_process, ctypes.c_void_p(target_addr),
+            ctypes.byref(check_mbi), ctypes.sizeof(check_mbi)
+        )
+        if check_ret == 0:
+            total_write_fail += 1
+            continue
+        if check_mbi.State != MEM_COMMIT or check_mbi.Protect not in (PAGE_READWRITE, PAGE_WRITECOPY, PAGE_EXECUTE_READWRITE):
+            total_write_fail += 1
+            continue
+
+        # 2. 重新读取目标字节，确认原始内容未变（compare-and-swap）
+        verify_buf = ctypes.create_string_buffer(patch_len)
+        verify_read = ctypes.c_size_t(0)
+        if not kernel32.ReadProcessMemory(
+            h_process, ctypes.c_void_p(target_addr),
+            verify_buf, patch_len, ctypes.byref(verify_read)
+        ):
+            total_write_fail += 1
+            continue
+        if verify_buf.raw[:patch_len] != old_bytes:
+            # 内容已变（章节切换中），跳过
+            total_write_fail += 1
+            continue
+
+        # 3. 写入
+        write_buf = ctypes.create_string_buffer(new_bytes)
+        bytes_written = ctypes.c_size_t(0)
+        ret = kernel32.WriteProcessMemory(
+            h_process, ctypes.c_void_p(target_addr),
+            write_buf, patch_len, ctypes.byref(bytes_written)
+        )
+        if ret and bytes_written.value == patch_len:
+            total_write_ok += 1
+            total_replacements += 1
+            region_set.add(base)
+            # 读回验证
+            check_buf = ctypes.create_string_buffer(patch_len)
+            check_read = ctypes.c_size_t(0)
+            kernel32.ReadProcessMemory(
+                h_process, ctypes.c_void_p(target_addr),
+                check_buf, patch_len, ctypes.byref(check_read)
+            )
+            if check_buf.raw[:patch_len] == new_bytes:
+                total_verified += 1
+        else:
+            total_write_fail += 1
+
+    total_regions = len(region_set)
     kernel32.CloseHandle(h_process)
 
-    return total_replacements, total_regions, details, scanned, total_write_ok, total_write_fail, total_verified
+    return total_replacements, total_regions, [], scanned, total_write_ok, total_write_fail, total_verified
 
 
 def find_game_process():
