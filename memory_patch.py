@@ -83,12 +83,9 @@ def load_mapping():
             print(f"  [跳过] {from_s} -> {to_s} (UTF-8 字节数不等)")
 
         # UTF-16LE 对（Unity/IL2CPP 原生字符串编码）
-        # 跳过单字（2字节）替换——误匹配率太高会导致堆损坏
         from_utf16 = from_s.encode('utf-16-le')
         to_utf16 = to_s.encode('utf-16-le')
-        if len(from_utf16) <= 2:
-            print(f"  [跳过] {from_s} -> {to_s} (UTF-16LE 单字过短，易误匹配)")
-        elif len(from_utf16) == len(to_utf16):
+        if len(from_utf16) == len(to_utf16):
             pairs.append((from_utf16, to_utf16, f"{from_s}->{to_s}", 'utf16'))
         else:
             print(f"  [跳过] {from_s} -> {to_s} (UTF-16LE 字节数不等)")
@@ -128,15 +125,44 @@ def is_valid_utf8_context(data, offset, match_len, context_size=50):
 
 
 def is_valid_utf16le_context(data, offset, match_len, context_size=60):
-    """检查匹配位置是否像有效的 UTF-16LE 文本（2字节对齐 + CJK/ASCII 范围）"""
+    """检查匹配位置是否像有效的 UTF-16LE 文本（2字节对齐 + CJK 邻居检查）"""
     # UTF-16LE 要求 2 字节对齐
     if offset % 2 != 0:
         return False
 
-    # 检查周围 16-bit code units 是否在合理范围
+    total_len = len(data)
+
+    # 核心检查：匹配位置前后 2 个 code unit 必须是 CJK 或常用标点
+    # 这能排除二进制数据中的偶然匹配
+    def read_code_unit(pos):
+        if pos < 0 or pos + 2 > total_len:
+            return 0
+        return data[pos] | (data[pos + 1] << 8)
+
+    def is_cjk_or_punct(cu):
+        return (0x4E00 <= cu <= 0x9FFF or   # CJK 基本
+                0x3000 <= cu <= 0x303F or     # CJK 标点
+                0xFF00 <= cu <= 0xFFEF or     # 全角
+                0x2000 <= cu <= 0x206F or     # 通用标点
+                0xFE30 <= cu <= 0xFE4F or     # CJK 兼容
+                0x0020 <= cu <= 0x007E)        # ASCII 可见
+
+    # 检查匹配前 2 个 code unit
+    pre1 = read_code_unit(offset - 2)
+    pre2 = read_code_unit(offset - 4)
+    # 检查匹配后 2 个 code unit
+    post1 = read_code_unit(offset + match_len)
+    post2 = read_code_unit(offset + match_len + 2)
+
+    neighbors = [pre1, pre2, post1, post2]
+    # 至少 2 个邻居是 CJK/标点（排除 0 和不合法值）
+    valid_neighbors = sum(1 for cu in neighbors if cu != 0 and is_cjk_or_punct(cu))
+    if valid_neighbors < 2:
+        return False
+
+    # 额外检查：整个上下文区域的 CJK 比例
     check_start = max(0, offset - context_size)
-    check_end = min(len(data), offset + match_len + context_size)
-    # 对齐到 2 字节边界
+    check_end = min(total_len, offset + match_len + context_size)
     check_start = check_start + (check_start % 2)
     check_end = check_end - (check_end % 2)
 
@@ -145,30 +171,9 @@ def is_valid_utf16le_context(data, offset, match_len, context_size=60):
 
     code_units = []
     for i in range(check_start, check_end - 1, 2):
-        code_unit = data[i] | (data[i + 1] << 8)
-        code_units.append(code_unit)
+        code_units.append(data[i] | (data[i + 1] << 8))
 
-    # 统计有效 code unit 比例
-    valid = 0
-    for cu in code_units:
-        # ASCII (0x0020-0x007E), CJK (0x4E00-0x9FFF), CJK 扩展,
-        # 常用标点 (0x3000-0x303F), 全角 (0xFF00-0xFFEF)
-        # 或者 0x0000 (null terminator)
-        if cu == 0x0000:
-            valid += 1
-        elif 0x0020 <= cu <= 0x007E:
-            valid += 1
-        elif 0x3000 <= cu <= 0x303F:
-            valid += 1
-        elif 0x4E00 <= cu <= 0x9FFF:
-            valid += 1
-        elif 0xFF00 <= cu <= 0xFFEF:
-            valid += 1
-        elif 0x2000 <= cu <= 0x206F:
-            valid += 1  # 通用标点
-        elif 0xFE30 <= cu <= 0xFE4F:
-            valid += 1  # CJK 兼容形式
-
+    valid = sum(1 for cu in code_units if is_cjk_or_punct(cu) or cu == 0x0000)
     return valid >= len(code_units) * 0.7
 
 
