@@ -30,7 +30,7 @@ PAGE_EXECUTE_READWRITE = 0x40
 kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
 
 SCAN_INTERVAL = 3       # 扫描间隔（秒）
-STARTUP_DELAY = 15      # 检测到游戏后等待加载的时间（秒）
+STARTUP_DELAY = 45      # 检测到游戏后等待加载的时间（秒）
 TRANSITION_COOLDOWN = 10  # 检测到章节切换后冷却时间（秒）
 REGION_CHANGE_THRESHOLD = 0.1  # 区域数量变化超过 10% 视为章节切换
 
