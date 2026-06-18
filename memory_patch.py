@@ -298,7 +298,7 @@ def find_game_process():
 
 def main():
     print("=" * 50)
-    print("  女帝篇 字幕还原补丁 v1.0")
+    print("  女帝篇 字幕还原补丁 v3.1")
     print("  运行时内存替换 | Ctrl+C 退出")
     print("=" * 50)
 

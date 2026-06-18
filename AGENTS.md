@@ -45,6 +45,12 @@ Subtitle files (encrypted `.k` format):
 
 Game loads subtitles from `.k` files at runtime (not from `.srt` files). The memory patch (`memory_patch.py`) replaces names directly in the game process memory after decryption.
 
+### Text encoding in memory
+
+Game display text is stored as **UTF-16LE** (Unity/IL2CPP native string format), not UTF-8. The memory patch generates both UTF-8 and UTF-16LE replacement pairs from `name_mapping.json`. A single `礼治` may appear as:
+- UTF-8: `E7 A4 BC E6 B2 BB` (5 bytes) — ~14 occurrences
+- UTF-16LE: `3C 79 BB 6C` (4 bytes) — ~6800 occurrences (primary display format)
+
 ## 内存补丁 (memory_patch.py)
 
 The game encrypts subtitle files with AES (TBUAESv1 format, key unknown). The `.srt` files on disk are not read at runtime. To fix names in subtitles, `memory_patch.py` patches the game's memory directly.
@@ -86,6 +92,16 @@ class MEMORY_BASIC_INFORMATION(ctypes.Structure):
 ### Subtitle data location
 
 Subtitles are loaded into large `MEM_PRIVATE/READWRITE` regions (32MB+). The scan filter must allow regions up to 50MB.
+
+### Write strategy: targeted byte patches
+
+**NEVER** write back the entire memory region. Between `ReadProcessMemory` and `WriteProcessMemory`, the game may modify other data in the same region. Writing back the full region overwrites the game's changes with stale data, causing crashes.
+
+**Always** collect specific `(offset, new_bytes)` pairs and use small, targeted `WriteProcessMemory` calls for only the changed bytes. Verify each write by reading back the bytes.
+
+### UTF-16LE context validation
+
+UTF-16LE matches must be 2-byte aligned (`offset % 2 == 0`). Validate by checking that surrounding 16-bit code units are in reasonable Unicode ranges (ASCII 0x0020-0x007E, CJK 0x4E00-0x9FFF, CJK punctuation 0x3000-0x303F, fullwidth 0xFF00-0xFFEF) with at least 70% valid ratio.
 
 ## PyInstaller Packaging
 
