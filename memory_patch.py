@@ -29,7 +29,8 @@ PAGE_EXECUTE_READWRITE = 0x40
 
 kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
 
-SCAN_INTERVAL = 3  # 扫描间隔（秒）
+SCAN_INTERVAL = 3       # 扫描间隔（秒）
+STARTUP_DELAY = 15      # 检测到游戏后等待加载的时间（秒）
 
 
 class MEMORY_BASIC_INFORMATION(ctypes.Structure):
@@ -319,6 +320,22 @@ def main():
                 break
 
     print(f"  找到游戏进程: PID {pid}")
+    print(f"  等待游戏加载 ({STARTUP_DELAY} 秒)...")
+    time.sleep(STARTUP_DELAY)
+
+    # 再次确认游戏还在运行（可能启动失败）
+    if find_game_process() is None:
+        print("  游戏已退出，等待重新启动...")
+        while True:
+            time.sleep(2)
+            pid = find_game_process()
+            if pid:
+                print(f"  重新检测到游戏进程: PID {pid}")
+                print(f"  等待游戏加载 ({STARTUP_DELAY} 秒)...")
+                time.sleep(STARTUP_DELAY)
+                if find_game_process() is not None:
+                    break
+
     print(f"\n开始实时替换 (每 {SCAN_INTERVAL} 秒扫描一次)")
     print("-" * 50)
 
