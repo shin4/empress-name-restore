@@ -134,46 +134,14 @@ def is_valid_utf8_context(data, offset, match_len, context_size=50):
 
 
 def is_valid_utf16le_context(data, offset, match_len, context_size=60):
-    """检查匹配位置是否像有效的 UTF-16LE 文本（2字节对齐 + CJK 邻居检查）"""
+    """检查匹配位置是否在 UTF-16LE 文本区域（2字节对齐 + 70% 区域 CJK 比例）"""
     # UTF-16LE 要求 2 字节对齐
     if offset % 2 != 0:
         return False
 
     total_len = len(data)
 
-    # 核心检查：匹配位置前后 2 个 code unit 必须是 CJK 或常用标点
-    # 这能排除二进制数据中的偶然匹配
-    def read_code_unit(pos):
-        if pos < 0 or pos + 2 > total_len:
-            return 0
-        return data[pos] | (data[pos + 1] << 8)
-
-    def is_cjk_or_punct(cu):
-        return (0x4E00 <= cu <= 0x9FFF or   # CJK 基本
-                0x3000 <= cu <= 0x303F or     # CJK 标点
-                0xFF00 <= cu <= 0xFFEF or     # 全角
-                0x2000 <= cu <= 0x206F or     # 通用标点
-                0xFE30 <= cu <= 0xFE4F or     # CJK 兼容
-                0x0020 <= cu <= 0x007E)        # ASCII 可见
-
-    # 检查匹配前 2 个 code unit
-    pre1 = read_code_unit(offset - 2)
-    pre2 = read_code_unit(offset - 4)
-    # 检查匹配后 2 个 code unit
-    post1 = read_code_unit(offset + match_len)
-    post2 = read_code_unit(offset + match_len + 2)
-
-    neighbors = [pre1, pre2, post1, post2]
-    # 邻居分为三类：CJK/标点、null(0x0000，字符串边界)、其他(二进制数据)
-    cjk_neighbors = sum(1 for cu in neighbors if cu != 0 and is_cjk_or_punct(cu))
-    null_neighbors = sum(1 for cu in neighbors if cu == 0)
-    other_neighbors = len(neighbors) - cjk_neighbors - null_neighbors
-
-    # 如果有非 null 非 CJK 的邻居，说明不是纯文本区域，拒绝
-    if other_neighbors > 0 and cjk_neighbors == 0:
-        return False
-
-    # 额外检查：整个上下文区域的 CJK 比例
+    # 检查整个上下文区域的 CJK 比例
     check_start = max(0, offset - context_size)
     check_end = min(total_len, offset + match_len + context_size)
     check_start = check_start + (check_start % 2)
@@ -186,7 +154,16 @@ def is_valid_utf16le_context(data, offset, match_len, context_size=60):
     for i in range(check_start, check_end - 1, 2):
         code_units.append(data[i] | (data[i + 1] << 8))
 
-    valid = sum(1 for cu in code_units if is_cjk_or_punct(cu) or cu == 0x0000)
+    def is_valid_cu(cu):
+        return (cu == 0x0000 or              # null 终止符
+                0x0020 <= cu <= 0x007E or     # ASCII 可见
+                0x2000 <= cu <= 0x206F or     # 通用标点
+                0x3000 <= cu <= 0x303F or     # CJK 标点
+                0x4E00 <= cu <= 0x9FFF or     # CJK 基本
+                0xFE30 <= cu <= 0xFE4F or     # CJK 兼容形式
+                0xFF00 <= cu <= 0xFFEF)        # 全角
+
+    valid = sum(1 for cu in code_units if is_valid_cu(cu))
     return valid >= len(code_units) * 0.7
 
 
@@ -354,7 +331,7 @@ def find_game_process():
 
 RAW_VERSION_URL = "https://raw.githubusercontent.com/shin4/empress-name-restore/master/VERSION"
 REPO_URL = "https://github.com/shin4/empress-name-restore"
-LOCAL_VERSION = "3.10"
+LOCAL_VERSION = "3.11"
 
 
 def check_update():
@@ -381,7 +358,7 @@ def check_update():
 
 def main():
     print("=" * 50)
-    print("  女帝篇 字幕还原补丁 v3.10")
+    print("  女帝篇 字幕还原补丁 v3.11")
     print("  运行时内存替换 | Ctrl+C 退出")
     print("=" * 50)
 

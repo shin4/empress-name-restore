@@ -704,7 +704,7 @@ $host.UI.RawUI.WindowTitle = "女帝篇 — 和谐人名还原工具"
 Write-Host ""
 Write-ColorLine "============================================" Cyan
 Write-ColorLine "  《女王的游戏：盛世天下》女帝篇" Cyan
-Write-ColorLine "      和谐人名还原工具 v3.10" Cyan
+Write-ColorLine "      和谐人名还原工具 v3.11" Cyan
 Write-ColorLine "============================================" Cyan
 Write-Host ""
 
