@@ -246,10 +246,24 @@ def scan_and_replace(pid, pairs):
 
                     # 只写入被修改的字节，不回写整个区域
                     for offset, new_bytes in patches:
+                        target_addr = base + offset
+                        # 写入前重新验证目标内存区域仍然有效
+                        check_mbi = MEMORY_BASIC_INFORMATION()
+                        check_ret = kernel32.VirtualQueryEx(
+                            h_process, ctypes.c_void_p(target_addr),
+                            ctypes.byref(check_mbi), ctypes.sizeof(check_mbi)
+                        )
+                        if check_ret == 0:
+                            total_write_fail += 1
+                            continue
+                        if check_mbi.State != MEM_COMMIT or check_mbi.Protect not in (PAGE_READWRITE, PAGE_WRITECOPY, PAGE_EXECUTE_READWRITE):
+                            total_write_fail += 1
+                            continue
+
                         write_buf = ctypes.create_string_buffer(new_bytes)
                         bytes_written = ctypes.c_size_t(0)
                         ret = kernel32.WriteProcessMemory(
-                            h_process, ctypes.c_void_p(base + offset),
+                            h_process, ctypes.c_void_p(target_addr),
                             write_buf, len(new_bytes), ctypes.byref(bytes_written)
                         )
                         if ret and bytes_written.value == len(new_bytes):
@@ -258,7 +272,7 @@ def scan_and_replace(pid, pairs):
                             verify_buf = ctypes.create_string_buffer(len(new_bytes))
                             verify_read = ctypes.c_size_t(0)
                             kernel32.ReadProcessMemory(
-                                h_process, ctypes.c_void_p(base + offset),
+                                h_process, ctypes.c_void_p(target_addr),
                                 verify_buf, len(new_bytes), ctypes.byref(verify_read)
                             )
                             if verify_buf.raw[:len(new_bytes)] == new_bytes:
