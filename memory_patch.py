@@ -83,9 +83,12 @@ def load_mapping():
             print(f"  [跳过] {from_s} -> {to_s} (UTF-8 字节数不等)")
 
         # UTF-16LE 对（Unity/IL2CPP 原生字符串编码）
+        # 跳过单字（2字节）替换——误匹配率太高会导致堆损坏
         from_utf16 = from_s.encode('utf-16-le')
         to_utf16 = to_s.encode('utf-16-le')
-        if len(from_utf16) == len(to_utf16):
+        if len(from_utf16) <= 2:
+            print(f"  [跳过] {from_s} -> {to_s} (UTF-16LE 单字过短，易误匹配)")
+        elif len(from_utf16) == len(to_utf16):
             pairs.append((from_utf16, to_utf16, f"{from_s}->{to_s}", 'utf16'))
         else:
             print(f"  [跳过] {from_s} -> {to_s} (UTF-16LE 字节数不等)")
