@@ -589,7 +589,7 @@ $host.UI.RawUI.WindowTitle = "女帝篇 — 和谐人名还原工具"
 Write-Host ""
 Write-ColorLine "============================================" Cyan
 Write-ColorLine "  《女王的游戏：盛世天下》女帝篇" Cyan
-Write-ColorLine "      和谐人名还原工具 v2.0" Cyan
+Write-ColorLine "      和谐人名还原工具 v3.0" Cyan
 Write-ColorLine "============================================" Cyan
 Write-Host ""
 
@@ -645,9 +645,10 @@ while ($true) {
     Write-Host "  [1] 一键替换（人名 + 字幕）"
     Write-Host "  [2] 一键验证（人名 + 字幕）"
     Write-Host "  [3] 一键还原（人名 + 字幕）"
-    Write-Host "  [4] 退出"
+    Write-Host "  [4] 启动内存补丁（字幕实时替换）"
+    Write-Host "  [5] 退出"
     Write-Host ""
-    $action = Read-Host "请选择操作 (1-4)"
+    $action = Read-Host "请选择操作 (1-5)"
 
     switch ($action) {
         "1" {
@@ -678,12 +679,36 @@ while ($true) {
         }
         "4" {
             Write-Host ""
+            # 查找 memory_patch.exe
+            $patchExe = $null
+            $candidates = @(
+                (Join-Path $PSScriptRoot "release\memory_patch.exe"),
+                (Join-Path $PSScriptRoot "memory_patch.exe")
+            )
+            foreach ($c in $candidates) {
+                if (Test-Path -LiteralPath $c) { $patchExe = $c; break }
+            }
+            if ($patchExe) {
+                Write-ColorLine "[启动] $patchExe" Green
+                Write-ColorLine "  需要管理员权限，游戏需已在运行中" Yellow
+                Write-ColorLine "  按 Ctrl+C 退出补丁" Yellow
+                Write-Host ""
+                Start-Process -FilePath $patchExe -Verb RunAs -Wait
+            } else {
+                Write-ColorLine "[错误] 未找到 memory_patch.exe" Red
+                Write-Host "  请将 release\ 目录与本工具放在同一文件夹下"
+                Write-Host "  或从 GitHub 下载: https://github.com/shin4/empress-name-restore"
+            }
+            Write-Host ""
+        }
+        "5" {
+            Write-Host ""
             Write-ColorLine "再见!" Cyan
             Write-Host ""
             exit 0
         }
         default {
-            Write-ColorLine "无效输入，请输入 1-4" Yellow
+            Write-ColorLine "无效输入，请输入 1-5" Yellow
             Write-Host ""
         }
     }
