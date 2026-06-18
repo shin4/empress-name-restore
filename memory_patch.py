@@ -158,7 +158,7 @@ def is_valid_utf16le_context(data, offset, match_len, context_size=60):
     neighbors = [pre1, pre2, post1, post2]
     # 至少 2 个邻居是 CJK/标点（排除 0 和不合法值）
     valid_neighbors = sum(1 for cu in neighbors if cu != 0 and is_cjk_or_punct(cu))
-    if valid_neighbors < 2:
+    if valid_neighbors < 1:
         return False
 
     # 额外检查：整个上下文区域的 CJK 比例
@@ -373,7 +373,7 @@ def find_game_process():
 
 RAW_VERSION_URL = "https://raw.githubusercontent.com/shin4/empress-name-restore/master/VERSION"
 REPO_URL = "https://github.com/shin4/empress-name-restore"
-LOCAL_VERSION = "3.7"
+LOCAL_VERSION = "3.8"
 
 
 def check_update():
@@ -400,7 +400,7 @@ def check_update():
 
 def main():
     print("=" * 50)
-    print("  女帝篇 字幕还原补丁 v3.7")
+    print("  女帝篇 字幕还原补丁 v3.8")
     print("  运行时内存替换 | Ctrl+C 退出")
     print("=" * 50)
 
